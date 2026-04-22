@@ -151,9 +151,9 @@ class PriceListForm(ft.Container):
         else:
             for s in sizes:
                 s_rates = existing_rates.get(s, {})
-                ws = ft.TextField(label="Wholesale", value=str(s_rates.get("wholesale_rate", 0)), width=85, **self.style_args, text_align=ft.TextAlign.RIGHT, keyboard_type=ft.KeyboardType.NUMBER)
-                rt = ft.TextField(label="Retail", value=str(s_rates.get("retail_rate", 0)), width=85, **self.style_args, text_align=ft.TextAlign.RIGHT, keyboard_type=ft.KeyboardType.NUMBER)
-                mrp = ft.TextField(label="MRP", value=str(s_rates.get("mrp_rate", 0)), width=85, **self.style_args, text_align=ft.TextAlign.RIGHT, keyboard_type=ft.KeyboardType.NUMBER)
+                ws = ft.TextField(label="Wholesale", value=str(s_rates.get("wholesale_rate", "")), width=85, **self.style_args, text_align=ft.TextAlign.RIGHT, keyboard_type=ft.KeyboardType.NUMBER)
+                rt = ft.TextField(label="Retail", value=str(s_rates.get("retail_rate", "")), width=85, **self.style_args, text_align=ft.TextAlign.RIGHT, keyboard_type=ft.KeyboardType.NUMBER)
+                mrp = ft.TextField(label="MRP", value=str(s_rates.get("mrp_rate", "")), width=85, **self.style_args, text_align=ft.TextAlign.RIGHT, keyboard_type=ft.KeyboardType.NUMBER)
                 
                 self.rate_inputs[s] = {"wholesale": ws, "retail": rt, "mrp": mrp}
                 
