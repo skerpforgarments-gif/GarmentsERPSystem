@@ -40,6 +40,7 @@ class ItemMasterForm(ft.Stack):
         self.style = self.style_dd # Alias
         self.item_name = ft.TextField(label="Item Name *", width=350, **self.style_args)
         self.hsn_code = ft.TextField(label="HSN Code", width=160, **self.style_args)
+        self.tax_dd   = ft.Dropdown(label="Tax", width=200, **self.style_args)
         self.inner_box_count = ft.TextField(label="Inner", width=80, value="1", **self.style_args)
         self.outer_box_qty = ft.TextField(label="Outer", width=80, value="1", **self.style_args)
         self.status_radio = ft.RadioGroup(
@@ -86,7 +87,7 @@ class ItemMasterForm(ft.Stack):
                     ft.Row([self.item_code, self.item_order], spacing=12),
                     ft.Row([ft.Row([self.brand_dd, self.btn_add_brand], spacing=0), self.variety, ft.Row([self.style_dd, self.btn_add_style], spacing=0)], spacing=12),
                     ft.Row([self.item_name], spacing=12),
-                    ft.Row([self.inner_box_count, self.outer_box_qty, self.hsn_code], spacing=12),
+                    ft.Row([self.inner_box_count, self.outer_box_qty, self.hsn_code, self.tax_dd], spacing=12),
                     # Size Section
                     ft.Container(
                         content=ft.Column([
@@ -94,6 +95,10 @@ class ItemMasterForm(ft.Stack):
                                 ft.Text("SIZE", weight="bold", size=10, color=AppColors.PRIMARY, style=ft.TextStyle(letter_spacing=1.0)),
                                 ft.TextButton("All", on_click=self.select_all, height=30),
                                 ft.TextButton("None", on_click=self.unselect_all, height=30),
+                                ft.VerticalDivider(width=1),
+                                ft.TextButton("S-3XL", on_click=lambda _: self.select_range(["S", "M", "L", "XL", "XXL", "XXXL", "2XL", "3XL"]), height=30),
+                                ft.TextButton("32-42", on_click=lambda _: self.select_range([str(x) for x in range(32, 43, 2)]), height=30),
+                                ft.TextButton("20-30", on_click=lambda _: self.select_range([str(x) for x in range(20, 31, 2)]), height=30),
                                 ft.Container(expand=True),
                                 ft.TextButton("New Size", icon=ft.icons.ADD, on_click=lambda _: self.btn_add_size_action(None), height=30),
                             ], spacing=10),
@@ -173,9 +178,26 @@ class ItemMasterForm(ft.Stack):
         for cb in self.size_checkboxes.values(): cb.value = False
         self.rebuild_size_matrix(); self.update()
 
-    def load_metadata(self, brands, styles, sizes):
+    def select_range(self, sizes):
+        """Clears current selection and selects only the provided range."""
+        for cb in self.size_checkboxes.values():
+            cb.value = False
+        for s in sizes:
+            if s in self.size_checkboxes:
+                self.size_checkboxes[s].value = True
+            else:
+                # If size doesn't exist, add it
+                cb = ft.Checkbox(label=s, value=True, on_change=self.on_size_change)
+                self.size_checkboxes[s] = cb
+        self._render_size_grid()
+        self.rebuild_size_matrix()
+        self.update()
+
+    def load_metadata(self, brands, styles, sizes, taxes=None):
         self.brand_dd.options = [ft.dropdown.Option(b) for b in brands]
         self.style_dd.options = [ft.dropdown.Option(s) for s in styles]
+        if taxes:
+            self.tax_dd.options = [ft.dropdown.Option(key=str(t["id"]), text=t["name"]) for t in taxes]
         checked_list = [s for s, cb in self.size_checkboxes.items() if cb.value]
         self.size_checkboxes.clear(); self.size_grid_row.controls.clear()
         
@@ -235,6 +257,7 @@ class ItemMasterForm(ft.Stack):
             "style": self.style.value or "", "item_name": self.item_name.value or "",
             "sizes": selected_sizes, "pcs_per_inner_box": int(self.inner_box_count.value or 1),
             "boxes_per_outer_box": int(self.outer_box_qty.value or 1), "hsn_code": self.hsn_code.value or "",
+            "tax_id": self.tax_dd.value,
             "is_approved": self.status_radio.value == "Approved", "is_blocked": self.status_radio.value == "Blocked",
             "reason": self.reason.value or "", "opening_stock": opening_stock,
         }
@@ -253,6 +276,8 @@ class ItemMasterForm(ft.Stack):
         self.inner_box_count.value = str(data.get("pcs_per_inner_box", 1))
         self.outer_box_qty.value = str(data.get("boxes_per_outer_box", 1))
         self.hsn_code.value = data.get("hsn_code", "")
+        if data.get("tax_id"):
+            self.tax_dd.value = str(data["tax_id"])
         self.status_radio.value = "Blocked" if data.get("is_blocked", False) else "Approved"
         self.reason.value = data.get("reason", "")
         for cb in self.size_checkboxes.values(): cb.value = False

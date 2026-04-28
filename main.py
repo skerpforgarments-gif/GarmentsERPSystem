@@ -26,13 +26,14 @@ def main(page: ft.Page):
     page.window_height = 900
     page.window_maximized = True
     page.padding = 0
+    page.bgcolor = ft.colors.WHITE
 
     # -----------------------------
     # GLOBAL STATE INIT
     # -----------------------------
     state.current_user = None
     state.current_company = None
-    state.company_id = None
+    state.company_id = "70d3f9f5-ce9e-4e90-9e4a-a48a04c2add4"
 
     # -----------------------------
     # BASIC CONNECTION CHECK

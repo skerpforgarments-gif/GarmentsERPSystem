@@ -18,3 +18,8 @@ __pycache__/
 # OS files
 Thumbs.db
 Desktop.ini
+
+# Generated files
+backup_*.json
+exports/
+settings.json

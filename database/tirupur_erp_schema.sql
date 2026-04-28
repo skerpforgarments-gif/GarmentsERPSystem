@@ -58,7 +58,8 @@ CREATE TABLE transporters (
     company_id  UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
     name        TEXT NOT NULL,
     address     TEXT,
-    gstin       TEXT
+    gstin       TEXT,
+    UNIQUE(company_id, name)
 );
 
 CREATE TABLE agents (
@@ -70,34 +71,50 @@ CREATE TABLE agents (
     bank_name           TEXT,
     bank_account        TEXT,
     bank_ifsc           TEXT,
-    commission_percent  NUMERIC(5,2) DEFAULT 0
+    commission_percent  NUMERIC(5,2) DEFAULT 0,
+    UNIQUE(company_id, name)
 );
 
 CREATE TABLE banks (
     id          UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     company_id  UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
-    name        TEXT NOT NULL
+    name        TEXT NOT NULL,
+    account_no  TEXT,
+    ifsc_code   TEXT,
+    branch      TEXT
 );
 
 CREATE TABLE taxes (
-    id          UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    company_id  UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
-    name        TEXT NOT NULL,
-    tax_type    TEXT,   -- CGST / SGST / IGST / TCS
-    rate_percent NUMERIC(5,2) DEFAULT 0
+    id            UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    company_id    UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+    name          TEXT NOT NULL,
+    hsn_code      TEXT,                        -- HSN / SAC code for GST returns
+    tax_type      TEXT DEFAULT 'GST',           -- GST / IGST / TCS / Exempt
+    cgst_percent  NUMERIC(5,2) DEFAULT 0,       -- Central GST component
+    sgst_percent  NUMERIC(5,2) DEFAULT 0,       -- State GST component
+    igst_percent  NUMERIC(5,2) DEFAULT 0,       -- Integrated GST (inter-state)
+    tcs_percent   NUMERIC(5,2) DEFAULT 0,       -- Tax Collected at Source
+    rate_percent  NUMERIC(5,2) DEFAULT 0        -- Total effective tax rate
 );
 
 CREATE TABLE staff (
     id          UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     company_id  UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
     name        TEXT NOT NULL,
-    designation TEXT
+    designation TEXT,
+    department  TEXT,
+    phone       TEXT,
+    address     TEXT,
+    salary      NUMERIC(12,2) DEFAULT 0
 );
 
 CREATE TABLE expense_ledgers (
-    id          UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    company_id  UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
-    name        TEXT NOT NULL
+    id           UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    company_id   UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+    name         TEXT NOT NULL,
+    account_code TEXT,
+    ledger_type  TEXT DEFAULT 'Expense',  -- Expense / Income / Asset / Liability
+    description  TEXT
 );
 
 CREATE TABLE general_items (
@@ -105,8 +122,10 @@ CREATE TABLE general_items (
     company_id  UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
     item_code   TEXT,
     item_name   TEXT NOT NULL,
-    uom         TEXT,
-    tax_id      UUID REFERENCES taxes(id)
+    uom         TEXT,                    -- Pcs / Box / Kg / Meter / Litre / Set / Pair
+    hsn_code    TEXT,                    -- HSN / SAC code
+    tax_name    TEXT,                    -- Display name of applicable tax
+    tax_id      UUID REFERENCES taxes(id) -- FK to taxes master
 );
 
 -- =========================================================
@@ -126,10 +145,13 @@ CREATE TABLE items (
     boxes_per_outer_box INTEGER DEFAULT 1,
     box_type            TEXT DEFAULT 'Single Box Pack',
     hsn_code            TEXT,
+    tax_id              UUID REFERENCES taxes(id),
+    tax_name            TEXT,                        -- Display name for the tax slab
     is_approved         BOOLEAN DEFAULT TRUE,
     is_blocked          BOOLEAN DEFAULT FALSE,
     reason              TEXT,
-    opening_stock       JSONB DEFAULT '{}'  -- {"80": 100, "85": 200, ...}
+    opening_stock       JSONB DEFAULT '{}',
+    UNIQUE(company_id, item_code)
 );
 
 -- =========================================================
@@ -214,10 +236,13 @@ CREATE TABLE parties (
     discount_scheme     NUMERIC(5,2) DEFAULT 0,   -- SPD
     discount_scd        NUMERIC(5,2) DEFAULT 0,   -- SCD
     discount_cd         NUMERIC(5,2) DEFAULT 0,   -- CD
+    discount_festival   NUMERIC(5,2) DEFAULT 0,   -- Festival Discount
     -- Remarks & Status
     remarks             TEXT,
     is_approved         BOOLEAN DEFAULT TRUE,
-    is_blocked          BOOLEAN DEFAULT FALSE
+    is_blocked          BOOLEAN DEFAULT FALSE,
+    UNIQUE(company_id, code),
+    UNIQUE(company_id, name)
 );
 
 -- Party Contacts Sub-Table (screenshot: grid at bottom of party master)
@@ -260,7 +285,7 @@ CREATE TABLE orders (
     total_pcs           INTEGER DEFAULT 0,
     total_boxes         NUMERIC(10,2) DEFAULT 0,
     total_amount        NUMERIC(12,2) DEFAULT 0,
-    -- Tax & Discount Footer
+    -- Tax & Discount Footer (Sequential)
     tax_type            TEXT DEFAULT 'IGST',
     tax_per             NUMERIC(5,2) DEFAULT 5,
     vat_cst_amount      NUMERIC(12,2) DEFAULT 0,
@@ -268,7 +293,10 @@ CREATE TABLE orders (
     td_amount           NUMERIC(12,2) DEFAULT 0,
     spd_percent         NUMERIC(5,2) DEFAULT 0,
     spd_amount          NUMERIC(12,2) DEFAULT 0,
+    festival_percent    NUMERIC(5,2) DEFAULT 0,
+    festival_amount     NUMERIC(12,2) DEFAULT 0,
     scd_percent         NUMERIC(5,2) DEFAULT 0,
+    scd_amount          NUMERIC(12,2) DEFAULT 0,
     cd_percent          NUMERIC(5,2) DEFAULT 0,
     cd_amount           NUMERIC(12,2) DEFAULT 0,
     round_off           NUMERIC(10,2) DEFAULT 0,
@@ -282,6 +310,7 @@ CREATE TABLE order_items (
     company_id      UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
     order_id        UUID NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
     item_id         UUID NOT NULL REFERENCES items(id),
+    item_name       TEXT,
     size_value      TEXT NOT NULL,
     rate            NUMERIC(10,2) DEFAULT 0,
     qty_pieces      INTEGER DEFAULT 0,
@@ -338,7 +367,12 @@ CREATE TABLE packing_slips (
     td_amount           NUMERIC(12,2) DEFAULT 0,
     spd_percent         NUMERIC(5,2) DEFAULT 0,
     spd_amount          NUMERIC(12,2) DEFAULT 0,
+    festival_percent    NUMERIC(5,2) DEFAULT 0,
+    festival_amount     NUMERIC(12,2) DEFAULT 0,
     scd_percent         NUMERIC(5,2) DEFAULT 0,
+    scd_amount          NUMERIC(12,2) DEFAULT 0,
+    cd_percent          NUMERIC(5,2) DEFAULT 0,
+    cd_amount           NUMERIC(12,2) DEFAULT 0,
     tax_amount          NUMERIC(12,2) DEFAULT 0,
     round_off           NUMERIC(10,2) DEFAULT 0,
     net_amount          NUMERIC(12,2) DEFAULT 0,
@@ -353,6 +387,7 @@ CREATE TABLE packing_slip_items (
     packing_slip_id     UUID NOT NULL REFERENCES packing_slips(id) ON DELETE CASCADE,
     order_id            UUID REFERENCES orders(id),
     item_id             UUID NOT NULL REFERENCES items(id),
+    item_name           TEXT,
     size_value          TEXT NOT NULL,
     rate                NUMERIC(10,2) DEFAULT 0,
     qty_pieces          INTEGER DEFAULT 0,
@@ -395,12 +430,16 @@ CREATE TABLE transport_invoices (
     total_amount        NUMERIC(12,2) DEFAULT 0,
     gross_amount        NUMERIC(12,2) DEFAULT 0,
     -- Discount Stacking (sequential per screenshot)
-    less_sd_percent     NUMERIC(5,2) DEFAULT 0,   -- Special Discount
-    less_sd_amount      NUMERIC(12,2) DEFAULT 0,
-    less_trade_percent  NUMERIC(5,2) DEFAULT 0,   -- Trade Discount (21%)
-    less_trade_amount   NUMERIC(12,2) DEFAULT 0,
-    less_cash_percent   NUMERIC(5,2) DEFAULT 0,   -- Cash Discount (2%)
-    less_cash_amount    NUMERIC(12,2) DEFAULT 0,
+    td_percent          NUMERIC(5,2) DEFAULT 0,   -- Trade Discount
+    td_amount           NUMERIC(12,2) DEFAULT 0,
+    spd_percent         NUMERIC(5,2) DEFAULT 0,   -- Scheme Discount
+    spd_amount          NUMERIC(12,2) DEFAULT 0,
+    festival_percent    NUMERIC(5,2) DEFAULT 0,   -- Festival Discount
+    festival_amount     NUMERIC(12,2) DEFAULT 0,
+    scd_percent         NUMERIC(5,2) DEFAULT 0,   -- Special Discount
+    scd_amount          NUMERIC(12,2) DEFAULT 0,
+    cd_percent          NUMERIC(5,2) DEFAULT 0,   -- Cash Discount
+    cd_amount           NUMERIC(12,2) DEFAULT 0,
     -- Tax
     tax_type            TEXT DEFAULT 'IGST',
     tax_per             NUMERIC(5,2) DEFAULT 5,
@@ -426,6 +465,7 @@ CREATE TABLE transport_invoice_items (
     transport_invoice_id    UUID NOT NULL REFERENCES transport_invoices(id) ON DELETE CASCADE,
     packing_slip_id         UUID REFERENCES packing_slips(id),
     item_id                 UUID NOT NULL REFERENCES items(id),
+    item_name               TEXT,
     size_value              TEXT NOT NULL,
     rate                    NUMERIC(10,2) DEFAULT 0,
     qty_pieces              INTEGER DEFAULT 0,
@@ -466,12 +506,17 @@ CREATE TABLE final_invoices (
     total_boxes             NUMERIC(10,2) DEFAULT 0,
     total_amount            NUMERIC(12,2) DEFAULT 0,
     gross_amount            NUMERIC(12,2) DEFAULT 0,
-    less_sd_percent         NUMERIC(5,2) DEFAULT 0,
-    less_sd_amount          NUMERIC(12,2) DEFAULT 0,
-    less_trade_percent      NUMERIC(5,2) DEFAULT 0,
-    less_trade_amount       NUMERIC(12,2) DEFAULT 0,
-    less_cash_percent       NUMERIC(5,2) DEFAULT 0,
-    less_cash_amount        NUMERIC(12,2) DEFAULT 0,
+    -- Discount Stacking (sequential)
+    td_percent          NUMERIC(5,2) DEFAULT 0,
+    td_amount           NUMERIC(12,2) DEFAULT 0,
+    spd_percent         NUMERIC(5,2) DEFAULT 0,
+    spd_amount          NUMERIC(12,2) DEFAULT 0,
+    festival_percent    NUMERIC(5,2) DEFAULT 0,
+    festival_amount     NUMERIC(12,2) DEFAULT 0,
+    scd_percent         NUMERIC(5,2) DEFAULT 0,
+    scd_amount          NUMERIC(12,2) DEFAULT 0,
+    cd_percent          NUMERIC(5,2) DEFAULT 0,
+    cd_amount           NUMERIC(12,2) DEFAULT 0,
     taxable_amount          NUMERIC(12,2) DEFAULT 0,
     tax_type                TEXT DEFAULT 'IGST',
     tax_per                 NUMERIC(5,2) DEFAULT 5,
@@ -488,10 +533,40 @@ CREATE TABLE final_invoice_items (
     company_id          UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
     final_invoice_id    UUID NOT NULL REFERENCES final_invoices(id) ON DELETE CASCADE,
     item_id             UUID NOT NULL REFERENCES items(id),
+    item_name           TEXT,
     size_value          TEXT NOT NULL,
     rate                NUMERIC(10,2) DEFAULT 0,
     qty_pieces          INTEGER DEFAULT 0,
     qty_boxes           NUMERIC(10,2) DEFAULT 0,
+    amount              NUMERIC(12,2) DEFAULT 0
+);
+
+-- =========================================================
+-- 9A. PROCUREMENT (PURCHASE ORDERS)
+-- =========================================================
+CREATE TABLE purchase_orders (
+    id                  UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    company_id          UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+    po_no               TEXT NOT NULL,
+    po_date             DATE NOT NULL DEFAULT CURRENT_DATE,
+    supplier_id         UUID NOT NULL REFERENCES parties(id),
+    destination         TEXT,
+    transporter_id      UUID REFERENCES transporters(id),
+    remarks             TEXT,
+    total_pcs           INTEGER DEFAULT 0,
+    total_amount        NUMERIC(12,2) DEFAULT 0,
+    status              TEXT DEFAULT 'Pending'
+);
+
+CREATE TABLE purchase_order_items (
+    id                  UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    company_id          UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+    purchase_order_id   UUID NOT NULL REFERENCES purchase_orders(id) ON DELETE CASCADE,
+    item_id             UUID NOT NULL REFERENCES items(id),
+    item_name           TEXT,
+    size_value          TEXT NOT NULL,
+    rate                NUMERIC(10,2) DEFAULT 0,
+    qty_pieces          INTEGER DEFAULT 0,
     amount              NUMERIC(12,2) DEFAULT 0
 );
 
@@ -541,6 +616,40 @@ CREATE TABLE ledger_entries (
 -- =========================================================
 ALTER TABLE companies ENABLE ROW LEVEL SECURITY;
 ALTER TABLE transporters ENABLE ROW LEVEL SECURITY;
+CREATE TABLE settings (
+    id                  UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    company_id          UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+    flow_type           TEXT DEFAULT 'Full' CHECK (flow_type IN ('Full', 'Direct')), -- Full = Order->Slip->Invoice
+    financial_year_start DATE,
+    financial_year_end   DATE,
+    invoice_prefix      TEXT,
+    order_prefix        TEXT,
+    UNIQUE(company_id)
+);
+
+CREATE TABLE purchase_orders (
+    id                  UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    company_id          UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+    po_no               TEXT NOT NULL,
+    po_date             DATE NOT NULL DEFAULT CURRENT_DATE,
+    supplier_id         UUID NOT NULL REFERENCES parties(id),
+    total_qty           INTEGER DEFAULT 0,
+    total_amount        NUMERIC(12,2) DEFAULT 0,
+    status              TEXT DEFAULT 'Pending',
+    created_at          TIMESTAMP DEFAULT now()
+);
+
+CREATE TABLE purchase_order_items (
+    id                  UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    company_id          UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+    purchase_order_id   UUID NOT NULL REFERENCES purchase_orders(id) ON DELETE CASCADE,
+    item_id             UUID NOT NULL REFERENCES items(id),
+    size_value          TEXT NOT NULL,
+    qty                 INTEGER DEFAULT 0,
+    rate                NUMERIC(10,2) DEFAULT 0,
+    amount              NUMERIC(12,2) DEFAULT 0
+);
+
 ALTER TABLE agents ENABLE ROW LEVEL SECURITY;
 ALTER TABLE banks ENABLE ROW LEVEL SECURITY;
 ALTER TABLE taxes ENABLE ROW LEVEL SECURITY;
@@ -563,17 +672,14 @@ ALTER TABLE final_invoice_items ENABLE ROW LEVEL SECURITY;
 ALTER TABLE receipt_vouchers ENABLE ROW LEVEL SECURITY;
 ALTER TABLE payment_vouchers ENABLE ROW LEVEL SECURITY;
 ALTER TABLE ledger_entries ENABLE ROW LEVEL SECURITY;
+ALTER TABLE settings ENABLE ROW LEVEL SECURITY;
+ALTER TABLE purchase_orders ENABLE ROW LEVEL SECURITY;
+ALTER TABLE purchase_order_items ENABLE ROW LEVEL SECURITY;
 
 
--- Add Festival Discount to Parties
-ALTER TABLE parties 
-ADD COLUMN discount_festival NUMERIC(5,2) DEFAULT 0;
-
--- Expand Bank Details
-ALTER TABLE banks 
-ADD COLUMN account_no TEXT,
-ADD COLUMN ifsc_code TEXT,
-ADD COLUMN branch TEXT;
+-- NOTE: All ALTER TABLE migrations have been merged into the CREATE TABLE
+-- statements above. This section is kept for reference only.
+-- Re-running this file on a fresh DB will produce the complete, up-to-date schema.
 
 
 -- Companies: user owns their own row
@@ -591,7 +697,8 @@ BEGIN FOR tbl IN SELECT unnest(ARRAY[
     'packing_slips','packing_slip_items',
     'transport_invoices','transport_invoice_items',
     'final_invoices','final_invoice_items',
-    'receipt_vouchers','payment_vouchers','ledger_entries'
+    'receipt_vouchers','payment_vouchers','ledger_entries',
+    'settings','purchase_orders','purchase_order_items'
 ]) LOOP
     EXECUTE format('
         CREATE POLICY "saas_all_%s" ON %I
@@ -600,55 +707,3 @@ BEGIN FOR tbl IN SELECT unnest(ARRAY[
         WITH CHECK (company_id = get_user_company_id());
     ', tbl, tbl);
 END LOOP; END $$;
-
--- =========================================================
--- 12. TEMPLATE SEED DATA (REPLICABLE FOR TESTING)
--- =========================================================
--- To replicate the system with test data, replace 'YOUR_COMPANY_ID_HERE' 
--- with your actual company UUID and run these commands.
-
-DO $$
-DECLARE
-    v_comp_id UUID := 'd3cfc1bc-e57f-4d38-b5eb-a17a7fd45d7f'; -- Use your testing ID
-    v_user_id UUID := (SELECT id FROM auth.users LIMIT 1); 
-    v_agent_id UUID;
-    v_trans_id UUID;
-    v_tax_id UUID;
-    v_item1_id UUID;
-    v_plist_id UUID;
-BEGIN
-    -- Ensure Company exists
-    IF NOT EXISTS (SELECT 1 FROM companies WHERE id = v_comp_id) THEN
-        INSERT INTO companies (id, user_id, name, company_code)
-        VALUES (v_comp_id, v_user_id, 'Mouliraj Garments', 'MRL001') ON CONFLICT DO NOTHING;
-    END IF;
-
-    -- Agent
-    INSERT INTO agents (company_id, name, commission_percent, bank_name, bank_account, bank_ifsc)
-    VALUES (v_comp_id, 'Krishna Agency', 5.0, 'HDFC Bank', '50100123456789', 'HDFC0001234')
-    RETURNING id INTO v_agent_id;
-
-    -- Transporter
-    INSERT INTO transporters (company_id, name)
-    VALUES (v_comp_id, 'VRL Logistics')
-    RETURNING id INTO v_trans_id;
-
-    -- Item
-    INSERT INTO items (company_id, item_code, item_name, brand_name, sizes, pcs_per_inner_box, boxes_per_outer_box)
-    VALUES (v_comp_id, 'TS-101', 'Cotton Round Neck T-Shirt', 'Mouliraj', ARRAY['S', 'M', 'L', 'XL'], 12, 10)
-    RETURNING id INTO v_item1_id;
-
-    -- Price List
-    INSERT INTO price_lists (company_id, list_name, price_type)
-    VALUES (v_comp_id, 'Standard Summer 2024', 'Wholesale')
-    RETURNING id INTO v_plist_id;
-
-    -- Size-wise rates
-    INSERT INTO price_list_items (company_id, price_list_id, item_id, size_value, wholesale_rate, mrp_rate)
-    SELECT v_comp_id, v_plist_id, v_item1_id, unnest(ARRAY['S', 'M', 'L', 'XL']), 150, 250;
-
-    -- Party
-    INSERT INTO parties (company_id, name, mobile, agent_id, transporter_id, price_list_id, price_type)
-    VALUES (v_comp_id, 'Global Traders Chennai', '9876543210', v_agent_id, v_trans_id, v_plist_id, 'Wholesale');
-
-END $$;

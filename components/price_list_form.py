@@ -1,6 +1,7 @@
 import flet as ft
 from datetime import datetime
 from core.theme import AppColors, AppStyles
+from components.size_matrix import sort_sizes
 
 class PriceListForm(ft.Container):
     def __init__(self, on_submit=None):
@@ -149,7 +150,7 @@ class PriceListForm(ft.Container):
         if not sizes:
             self.matrix_grid.controls.append(ft.Text("No sizes configured for this item.", color="red"))
         else:
-            for s in sizes:
+            for s in sort_sizes(sizes):
                 s_rates = existing_rates.get(s, {})
                 ws = ft.TextField(label="Wholesale", value=str(s_rates.get("wholesale_rate", "")), width=85, **self.style_args, text_align=ft.TextAlign.RIGHT, keyboard_type=ft.KeyboardType.NUMBER)
                 rt = ft.TextField(label="Retail", value=str(s_rates.get("retail_rate", "")), width=85, **self.style_args, text_align=ft.TextAlign.RIGHT, keyboard_type=ft.KeyboardType.NUMBER)

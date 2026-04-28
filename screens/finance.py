@@ -100,7 +100,7 @@ class FinanceScreen(ft.Container):
 
         form = FormBuilder(fields, on_submit=self.save_receipt)
 
-        data = select("receipts", {"company_id": state.company_id})
+        data = select("receipt_vouchers", {"company_id": state.company_id})
 
         columns = [
             {"key": "party_id", "label": "Party"},
@@ -120,10 +120,10 @@ class FinanceScreen(ft.Container):
         data["company_id"] = state.company_id
 
         # Insert receipt
-        insert("receipts", data)
+        insert("receipt_vouchers", data)
 
         # Ledger update (credit)
-        insert("ledger", {
+        insert("ledger_entries", {
             "company_id": state.company_id,
             "party_id": data["party_id"],
             "debit": 0,
@@ -151,7 +151,7 @@ class FinanceScreen(ft.Container):
 
         form = FormBuilder(fields, on_submit=self.save_payment)
 
-        data = select("payments", {"company_id": state.company_id})
+        data = select("payment_vouchers", {"company_id": state.company_id})
 
         columns = [
             {"key": "party_id", "label": "Party"},
@@ -171,10 +171,10 @@ class FinanceScreen(ft.Container):
         data["company_id"] = state.company_id
 
         # Insert payment
-        insert("payments", data)
+        insert("payment_vouchers", data)
 
         # Ledger update (credit)
-        insert("ledger", {
+        insert("ledger_entries", {
             "company_id": state.company_id,
             "party_id": data["party_id"],
             "debit": float(data["amount"]),

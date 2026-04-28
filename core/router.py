@@ -1,6 +1,7 @@
 from screens.dashboard import DashboardScreen
 from screens.masters import MastersScreen
 from screens.sales import SalesScreen
+from screens.purchases import PurchasesScreen
 from screens.finance import FinanceScreen
 from screens.reports import ReportsScreen
 from screens.settings import SettingsScreen
@@ -22,6 +23,7 @@ class Router:
             "dashboard": DashboardScreen,
             "masters": MastersScreen,
             "sales": SalesScreen,
+            "purchases": PurchasesScreen,
             "finance": FinanceScreen,
             "reports": ReportsScreen,
             "settings": SettingsScreen,

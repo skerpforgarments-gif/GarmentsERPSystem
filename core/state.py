@@ -1,3 +1,6 @@
+import json
+import os
+
 class AppState:
     def __init__(self):
         # =========================
@@ -12,14 +15,32 @@ class AppState:
         self.company_id = None
 
         # =========================
-        # APP CONTEXT
+        # APP CONTEXT & SETTINGS
         # =========================
         self.sales_mode = "order"  # order / packing / transport / invoice
+        self.settings = {"direct_invoice": False}
+        self.load_settings()
 
         # =========================
         # SUBSCRIBERS
         # =========================
         self._subscribers = []
+
+    def load_settings(self):
+        try:
+            if os.path.exists("settings.json"):
+                with open("settings.json", "r") as f:
+                    self.settings.update(json.load(f))
+        except:
+            pass
+            
+    def save_settings(self):
+        try:
+            with open("settings.json", "w") as f:
+                json.dump(self.settings, f)
+            self._notify()
+        except:
+            pass
 
     # =========================================================
     # SUBSCRIBE

@@ -17,8 +17,9 @@ class MainLayout(ft.Row):
         # =========================
         self.content_area = ft.Container(
             expand=True,
-            padding=20,
-            bgcolor=AppColors.BG_MAIN,
+            padding=0,
+            bgcolor=ft.colors.WHITE,
+            clip_behavior=ft.ClipBehavior.HARD_EDGE,
         )
 
         # =========================
@@ -33,6 +34,7 @@ class MainLayout(ft.Row):
             ("Dashboard", "dashboard", ft.icons.DASHBOARD),
             ("Masters", "masters", ft.icons.STORAGE),
             ("Sales", "sales", ft.icons.SHOPPING_CART),
+            ("Purchases", "purchases", ft.icons.LOCAL_SHIPPING),
             ("Finance", "finance", ft.icons.ACCOUNT_BALANCE_WALLET),
             ("Reports", "reports", ft.icons.BAR_CHART),
             ("Settings", "settings", ft.icons.SETTINGS),
@@ -115,6 +117,7 @@ class MainLayout(ft.Row):
             "DashboardScreen": "dashboard",
             "MastersScreen": "masters",
             "SalesScreen": "sales",
+            "PurchasesScreen": "purchases",
             "FinanceScreen": "finance",
             "ReportsScreen": "reports",
             "SettingsScreen": "settings"

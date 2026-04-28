@@ -8,6 +8,7 @@ from components.table import TableBuilder
 from components.form import FormBuilder
 from components.item_master_form import ItemMasterForm
 from components.price_list_form import PriceListForm
+from components.size_matrix import sort_sizes
 
 
 # =========================================================
@@ -97,16 +98,16 @@ class PartyMasterForm(ft.Container):
         self.tcs_applicable = ft.Checkbox(label="TCS", value=False, check_color=AppColors.PRIMARY)
 
         # --- Discounts ---
-        self.disc_trade = ft.TextField(label="TD %", width=90, value="0",
+        self.disc_trade = ft.TextField(label="Trade % (TD)", width=120, value="0",
                                          keyboard_type=ft.KeyboardType.NUMBER, **self.style_args)
-        self.disc_scheme = ft.TextField(label="SPD %", width=90, value="0",
+        self.disc_scheme = ft.TextField(label="Scheme % (SPD)", width=120, value="0",
                                           keyboard_type=ft.KeyboardType.NUMBER, **self.style_args)
-        self.disc_scd = ft.TextField(label="SCD %", width=90, value="0",
-                                       keyboard_type=ft.KeyboardType.NUMBER, **self.style_args)
-        self.disc_cd = ft.TextField(label="CD %", width=90, value="0",
-                                     keyboard_type=ft.KeyboardType.NUMBER, **self.style_args)
-        self.disc_festival = ft.TextField(label="Festival %", width=90, value="0",
+        self.disc_festival = ft.TextField(label="Festival %", width=120, value="0",
                                            keyboard_type=ft.KeyboardType.NUMBER, **self.style_args)
+        self.disc_special = ft.TextField(label="Special % (SCD)", width=120, value="0",
+                                       keyboard_type=ft.KeyboardType.NUMBER, **self.style_args)
+        self.disc_cash = ft.TextField(label="Cash % (CD)", width=120, value="0",
+                                     keyboard_type=ft.KeyboardType.NUMBER, **self.style_args)
 
         # --- Bank Details ---
         self.bank_name = ft.TextField(label="Bank Name", width=220, **self.style_args)
@@ -180,8 +181,8 @@ class PartyMasterForm(ft.Container):
                 section("Tax Settings", [
                     ft.Row([self.tax_type, self.gst_percent, self.igst_percent, self.tcs_applicable], spacing=10, wrap=True),
                 ]),
-                section("Discount Structure", [
-                    ft.Row([self.disc_trade, self.disc_scheme, self.disc_scd, self.disc_cd, self.disc_festival], spacing=10, wrap=True),
+                section("Discount Structure (Calculated Sequentially)", [
+                    ft.Row([self.disc_trade, self.disc_scheme, self.disc_festival, self.disc_special, self.disc_cash], spacing=10, wrap=True),
                 ]),
                 section("Bank Details", [
                     ft.Row([self.bank_name, self.bank_acc, self.bank_ifsc], spacing=10, wrap=True),
@@ -231,9 +232,9 @@ class PartyMasterForm(ft.Container):
             "tcs_applicable": self.tcs_applicable.value,
             "discount_trade": float(self.disc_trade.value or 0),
             "discount_scheme": float(self.disc_scheme.value or 0),
-            "discount_scd": float(self.disc_scd.value or 0),
-            "discount_cd": float(self.disc_cd.value or 0),
             "discount_festival": float(self.disc_festival.value or 0),
+            "discount_scd": float(self.disc_special.value or 0),
+            "discount_cd": float(self.disc_cash.value or 0),
             "bank_name": self.bank_name.value or "",
             "bank_account_no": self.bank_acc.value or "",
             "bank_ifsc": self.bank_ifsc.value or "",
@@ -293,9 +294,9 @@ class PartyMasterForm(ft.Container):
         self.tcs_applicable.value = data.get("tcs_applicable", False)
         self.disc_trade.value = str(data.get("discount_trade", 0))
         self.disc_scheme.value = str(data.get("discount_scheme", 0))
-        self.disc_scd.value = str(data.get("discount_scd", 0))
-        self.disc_cd.value = str(data.get("discount_cd", 0))
         self.disc_festival.value = str(data.get("discount_festival", 0))
+        self.disc_special.value = str(data.get("discount_scd", 0))
+        self.disc_cash.value = str(data.get("discount_cd", 0))
         self.bank_name.value = data.get("bank_name", "")
         self.bank_acc.value = data.get("bank_account_no", "")
         self.bank_ifsc.value = data.get("bank_ifsc", "")
@@ -483,18 +484,27 @@ class MastersScreen(ft.Container):
         for i in data:
             if isinstance(i.get("sizes"), list):
                 all_sizes_raw.extend(i.get("sizes"))
-        unique_sizes = sorted(list(set(str(s) for s in all_sizes_raw)))
-        self.form.load_metadata(brands, styles, unique_sizes)
+        unique_sizes = sort_sizes(list(set(str(s) for s in all_sizes_raw)))
+        taxes = select("taxes", {"company_id": state.company_id})
+        self.form.load_metadata(brands, styles, unique_sizes, taxes=taxes)
         
         for item in data:
             stock = item.get("opening_stock", {})
             item["total_stock"] = sum(int(v) for v in stock.values() if str(v).isdigit()) if isinstance(stock, dict) else 0
 
         table = TableBuilder(
-            [{"key": "item_code", "label": "Code"}, {"key": "item_name", "label": "Name"},
-             {"key": "brand_name", "label": "Brand"}, {"key": "style", "label": "Style"},
-             {"key": "total_stock", "label": "Total Stock"}, {"key": "pcs_per_inner_box", "label": "Inner"},
-             {"key": "boxes_per_outer_box", "label": "Outer"}, {"key": "hsn_code", "label": "HSN"}],
+            [
+                {"key": "item_code", "label": "Code"},
+                {"key": "item_name", "label": "Name"},
+                {"key": "brand_name", "label": "Brand"},
+                {"key": "variety", "label": "Variety"},
+                {"key": "style", "label": "Style"},
+                {"key": "total_stock", "label": "Opn Stock"},
+                {"key": "pcs_per_inner_box", "label": "Inner"},
+                {"key": "boxes_per_outer_box", "label": "Outer"},
+                {"key": "hsn_code", "label": "HSN"},
+                {"key": "tax_name", "label": "Tax Slab"},
+            ],
             data, on_edit=self.edit_item, on_delete=self.delete_item
         )
         self.form_area.content = self.form
@@ -504,6 +514,12 @@ class MastersScreen(ft.Container):
     def save_item(self, data):
         data["company_id"] = state.company_id
         try:
+            # Duplicate check
+            existing = select("items", {"company_id": state.company_id, "item_code": data["item_code"]})
+            if existing and (not self.edit_id or str(existing[0]["id"]) != str(self.edit_id)):
+                self._snack(f"Error: Item code '{data['item_code']}' already exists!", "red")
+                return
+
             if self.edit_id:
                 update("items", data, {"id": self.edit_id})
                 self.edit_id = None
@@ -511,13 +527,9 @@ class MastersScreen(ft.Container):
                 insert("items", data)
             self.close_modal()
             self.load_items()
-            self.page.snack_bar = ft.SnackBar(ft.Text("Item Saved Successfully"), bgcolor="green")
-            self.page.snack_bar.open = True
-            self.page.update()
+            self._snack("Item Saved Successfully", "green")
         except Exception as e:
-            self.page.snack_bar = ft.SnackBar(ft.Text(f"Error: {e}"), bgcolor="red")
-            self.page.snack_bar.open = True
-            self.page.update()
+            self._snack(f"Error: {e}", "red")
 
     def edit_item(self, row):
         self.edit_id = row["id"]
@@ -535,8 +547,23 @@ class MastersScreen(ft.Container):
         items_data = select("items", {"company_id": state.company_id})
         self.form.load_metadata(items_data)
         data = select("price_lists", {"company_id": state.company_id})
+        # Count items for each price list
+        items_counts = select("price_list_items", {"company_id": state.company_id})
+        count_map = {}
+        for x in items_counts:
+            pid = str(x["price_list_id"])
+            count_map[pid] = count_map.get(pid, 0) + 1
+        
+        for p in data:
+            p["item_count"] = count_map.get(str(p["id"]), 0)
+
         table = TableBuilder(
-            [{"key": "list_name", "label": "List Name"}, {"key": "effective_date", "label": "Date"}, {"key": "price_type", "label": "Type"}],
+            [
+                {"key": "list_name", "label": "List Name"},
+                {"key": "effective_date", "label": "Date"},
+                {"key": "price_type", "label": "Type"},
+                {"key": "item_count", "label": "No. of Items"},
+            ],
             data, on_edit=self.edit_price_list, on_delete=self.delete_price_list
         )
         self.form_area.content = self.form
@@ -584,9 +611,39 @@ class MastersScreen(ft.Container):
         self.form = PartyMasterForm(on_submit=self.save_party)
         self.form.load_metadata(select("agents", {"company_id": state.company_id}), select("transporters", {"company_id": state.company_id}), select("price_lists", {"company_id": state.company_id}))
         data = select("parties", {"company_id": state.company_id})
+        # Resolve Agent/Transporter/PriceList names for the table
+        agents = select("agents", {"company_id": state.company_id})
+        transporters = select("transporters", {"company_id": state.company_id})
+        price_lists = select("price_lists", {"company_id": state.company_id})
+        
+        agent_map = {str(a["id"]): a["name"] for a in agents}
+        trans_map = {str(t["id"]): t["name"] for t in transporters}
+        plist_map = {str(p["id"]): p["list_name"] for p in price_lists}
+        
+        for p in data:
+            p["agent_name"] = agent_map.get(str(p.get("agent_id")), "-")
+            p["transporter_name"] = trans_map.get(str(p.get("transporter_id")), "-")
+            p["price_list_name"] = plist_map.get(str(p.get("price_list_id")), "-")
+            # Combined discount display
+            p["discounts"] = f"T:{p.get('discount_trade',0)} S:{p.get('discount_scheme',0)} F:{p.get('discount_festival',0)} SP:{p.get('discount_scd',0)} C:{p.get('discount_cd',0)}"
+            p["full_address"] = f"{p.get('address_line1','')}, {p.get('city','')}"
+
         table = TableBuilder(
-            [{"key": "code", "label": "Code"}, {"key": "name", "label": "Name"}, {"key": "mobile", "label": "Mobile"},
-             {"key": "city", "label": "City"}, {"key": "gstin", "label": "GSTIN"}, {"key": "price_type", "label": "Type"}],
+            [
+                {"key": "code", "label": "Code"},
+                {"key": "name", "label": "Name"},
+                {"key": "mobile", "label": "Mobile"},
+                {"key": "full_address", "label": "Address"},
+                {"key": "gstin", "label": "GSTIN"},
+                {"key": "agent_name", "label": "Agent"},
+                {"key": "transporter_name", "label": "Transporter"},
+                {"key": "price_list_name", "label": "Price List"},
+                {"key": "price_type", "label": "Type"},
+                {"key": "discounts", "label": "Discounts (%)"},
+                {"key": "credit_days", "label": "Cr. Days"},
+                {"key": "credit_limit", "label": "Cr. Limit"},
+                {"key": "bank_name", "label": "Bank"},
+            ],
             data, on_edit=self.edit_party, on_delete=self.delete_party
         )
         self.form_area.content = self.form
@@ -596,6 +653,13 @@ class MastersScreen(ft.Container):
     def save_party(self, data):
         data["company_id"] = state.company_id
         try:
+            # Duplicate check
+            if data.get("code"):
+                existing = select("parties", {"company_id": state.company_id, "code": data["code"]})
+                if existing and (not self.edit_id or str(existing[0]["id"]) != str(self.edit_id)):
+                    self._snack(f"Error: Party code '{data['code']}' already exists!", "red")
+                    return
+
             if self.edit_id:
                 update("parties", data, {"id": self.edit_id})
                 self.edit_id = None
@@ -603,7 +667,15 @@ class MastersScreen(ft.Container):
                 insert("parties", data)
             self.close_modal()
             self.load_parties()
-        except: pass
+            self._snack("Party Saved Successfully", "green")
+        except Exception as e:
+            self._snack(f"Error: {e}", "red")
+
+    def _snack(self, msg, color):
+        if self.page:
+            self.page.snack_bar = ft.SnackBar(ft.Text(msg), bgcolor=color)
+            self.page.snack_bar.open = True
+            self.page.update()
 
     def edit_party(self, row):
         self.edit_id = row["id"]
@@ -632,55 +704,146 @@ class MastersScreen(ft.Container):
         self._confirm_delete(f"Delete entry '{row.get('name') or row.get('item_name')}'?", lambda: (delete(table, {"id": row["id"]}), self.load_tab(self.current_tab)))
 
     def load_agents(self):
-        self._generic_loader("agents", [{"name": "name", "label": "Name *", "required": True}, {"name": "address", "label": "Address"}, {"name": "gstin", "label": "GSTIN"}, {"name": "bank_name", "label": "Bank"}, {"name": "bank_account", "label": "Account"}, {"name": "bank_ifsc", "label": "IFSC"}, {"name": "commission_percent", "label": "Comm %", "type": "number"}],
-                             [{"key": "name", "label": "Name"}, {"key": "gstin", "label": "GSTIN"}, {"key": "commission_percent", "label": "Comm. %"}, {"key": "bank_name", "label": "Bank"}], self.save_agent)
+        self._generic_loader("agents", 
+                             [{"name": "name", "label": "Name *", "required": True}, {"name": "address", "label": "Address"}, {"name": "gstin", "label": "GSTIN"}, {"name": "bank_name", "label": "Bank"}, {"name": "bank_account", "label": "Account"}, {"name": "bank_ifsc", "label": "IFSC"}, {"name": "commission_percent", "label": "Comm %", "type": "number"}],
+                             [{"key": "name", "label": "Name"}, {"key": "address", "label": "Address"}, {"key": "gstin", "label": "GSTIN"}, {"key": "commission_percent", "label": "Comm. %"}, {"key": "bank_name", "label": "Bank Name"}, {"key": "bank_account", "label": "Account No"}, {"key": "bank_ifsc", "label": "IFSC"}], 
+                             self.save_agent)
     def save_agent(self, data):
         data["company_id"] = state.company_id
         (update("agents", data, {"id": self.edit_id}) and setattr(self, "edit_id", None)) if self.edit_id else insert("agents", data)
         self.close_modal(); self.load_agents()
 
     def load_transporters(self):
-        self._generic_loader("transporters", [{"name": "name", "label": "Name *", "required": True}, {"name": "address", "label": "Address"}, {"name": "gstin", "label": "GSTIN"}],
-                             [{"key": "name", "label": "Name"}, {"key": "gstin", "label": "GSTIN"}], self.save_transporter)
+        self._generic_loader("transporters", 
+                             [{"name": "name", "label": "Name *", "required": True}, {"name": "address", "label": "Address"}, {"name": "gstin", "label": "GSTIN"}],
+                             [{"key": "name", "label": "Name"}, {"key": "address", "label": "Address"}, {"key": "gstin", "label": "GSTIN"}], 
+                             self.save_transporter)
     def save_transporter(self, data):
         data["company_id"] = state.company_id
         (update("transporters", data, {"id": self.edit_id}) and setattr(self, "edit_id", None)) if self.edit_id else insert("transporters", data)
         self.close_modal(); self.load_transporters()
 
     def load_banks(self):
-        self._generic_loader("banks", [{"name": "name", "label": "Bank Name *", "required": True}, {"name": "account_no", "label": "Account No"}, {"name": "ifsc_code", "label": "IFSC"}, {"name": "branch", "label": "Branch"}],
-                             [{"key": "name", "label": "Bank Name"}, {"key": "account_no", "label": "Account No"}, {"key": "branch", "label": "Branch"}], self.save_bank)
+        self._generic_loader("banks", 
+                             [{"name": "name", "label": "Bank Name *", "required": True}, {"name": "account_no", "label": "Account No"}, {"name": "ifsc_code", "label": "IFSC"}, {"name": "branch", "label": "Branch"}],
+                             [{"key": "name", "label": "Bank Name"}, {"key": "account_no", "label": "Account No"}, {"key": "ifsc_code", "label": "IFSC"}, {"key": "branch", "label": "Branch"}], 
+                             self.save_bank)
     def save_bank(self, data):
         data["company_id"] = state.company_id
         (update("banks", data, {"id": self.edit_id}) and setattr(self, "edit_id", None)) if self.edit_id else insert("banks", data)
         self.close_modal(); self.load_banks()
 
     def load_taxes(self):
-        self._generic_loader("taxes", [{"name": "name", "label": "Tax Name *", "required": True}, {"name": "tax_type", "label": "Type"}, {"name": "rate_percent", "label": "Rate %", "type": "number"}],
-                             [{"key": "name", "label": "Name"}, {"key": "tax_type", "label": "Type"}, {"key": "rate_percent", "label": "Rate %"}], self.save_tax)
+        self._generic_loader(
+            "taxes",
+            [
+                {"name": "name",        "label": "Tax Name *",  "required": True},
+                {"name": "hsn_code",    "label": "HSN / SAC Code"},
+                {"name": "tax_type",    "label": "Tax Type",    "type": "dropdown",
+                 "options": [{"value": "GST", "label": "GST"}, {"value": "IGST", "label": "IGST"},
+                             {"value": "TCS", "label": "TCS"},  {"value": "Exempt", "label": "Exempt"}]},
+                {"name": "cgst_percent",  "label": "CGST %",   "type": "number", "default": "0"},
+                {"name": "sgst_percent",  "label": "SGST %",   "type": "number", "default": "0"},
+                {"name": "igst_percent",  "label": "IGST %",   "type": "number", "default": "0"},
+                {"name": "tcs_percent",   "label": "TCS %",    "type": "number", "default": "0"},
+                {"name": "rate_percent",  "label": "Total Tax Rate %", "type": "number", "default": "0"},
+            ],
+            [
+                {"key": "name",        "label": "Tax Name"},
+                {"key": "hsn_code",    "label": "HSN/SAC"},
+                {"key": "tax_type",    "label": "Type"},
+                {"key": "cgst_percent","label": "CGST %"},
+                {"key": "sgst_percent","label": "SGST %"},
+                {"key": "igst_percent","label": "IGST %"},
+                {"key": "tcs_percent", "label": "TCS %"},
+                {"key": "rate_percent","label": "Total Rate %"},
+            ],
+            self.save_tax
+        )
     def save_tax(self, data):
         data["company_id"] = state.company_id
+        for pct_field in ["cgst_percent", "sgst_percent", "igst_percent", "tcs_percent", "rate_percent"]:
+            try: data[pct_field] = float(data.get(pct_field) or 0)
+            except: data[pct_field] = 0.0
         (update("taxes", data, {"id": self.edit_id}) and setattr(self, "edit_id", None)) if self.edit_id else insert("taxes", data)
         self.close_modal(); self.load_taxes()
 
     def load_staff(self):
-        self._generic_loader("staff", [{"name": "name", "label": "Name *", "required": True}, {"name": "designation", "label": "Designation"}],
-                             [{"key": "name", "label": "Name"}, {"key": "designation", "label": "Designation"}], self.save_staff)
+        self._generic_loader(
+            "staff",
+            [
+                {"name": "name",        "label": "Name *",       "required": True},
+                {"name": "designation", "label": "Designation"},
+                {"name": "department",  "label": "Department"},
+                {"name": "phone",       "label": "Phone"},
+                {"name": "address",     "label": "Address"},
+                {"name": "salary",      "label": "Salary",        "type": "number", "default": "0"},
+            ],
+            [
+                {"key": "name",        "label": "Name"},
+                {"key": "designation", "label": "Designation"},
+                {"key": "department",  "label": "Department"},
+                {"key": "phone",       "label": "Phone"},
+                {"key": "salary",      "label": "Salary"},
+                {"key": "address",     "label": "Address"},
+            ],
+            self.save_staff
+        )
     def save_staff(self, data):
         data["company_id"] = state.company_id
+        try: data["salary"] = float(data.get("salary") or 0)
+        except: data["salary"] = 0.0
         (update("staff", data, {"id": self.edit_id}) and setattr(self, "edit_id", None)) if self.edit_id else insert("staff", data)
         self.close_modal(); self.load_staff()
 
     def load_expense_ledgers(self):
-        self._generic_loader("expense_ledgers", [{"name": "name", "label": "Ledger Name *", "required": True}], [{"key": "name", "label": "Ledger Name"}], self.save_ledger)
+        self._generic_loader(
+            "expense_ledgers",
+            [
+                {"name": "name",         "label": "Ledger Name *", "required": True},
+                {"name": "account_code",  "label": "Account Code"},
+                {"name": "ledger_type",   "label": "Type", "type": "dropdown",
+                 "options": [{"value": "Expense", "label": "Expense"},
+                             {"value": "Income",  "label": "Income"},
+                             {"value": "Asset",   "label": "Asset"},
+                             {"value": "Liability","label": "Liability"}]},
+                {"name": "description",   "label": "Description"},
+            ],
+            [
+                {"key": "name",        "label": "Ledger Name"},
+                {"key": "account_code","label": "Code"},
+                {"key": "ledger_type", "label": "Type"},
+                {"key": "description", "label": "Description"},
+            ],
+            self.save_ledger
+        )
     def save_ledger(self, data):
         data["company_id"] = state.company_id
         (update("expense_ledgers", data, {"id": self.edit_id}) and setattr(self, "edit_id", None)) if self.edit_id else insert("expense_ledgers", data)
         self.close_modal(); self.load_expense_ledgers()
 
     def load_general_items(self):
-        self._generic_loader("general_items", [{"name": "item_code", "label": "Code"}, {"name": "item_name", "label": "Name *", "required": True}, {"name": "uom", "label": "UOM"}],
-                             [{"key": "item_code", "label": "Code"}, {"key": "item_name", "label": "Name"}, {"key": "uom", "label": "UOM"}], self.save_general_item)
+        self._generic_loader(
+            "general_items",
+            [
+                {"name": "item_code", "label": "Code"},
+                {"name": "item_name", "label": "Name *", "required": True},
+                {"name": "uom",       "label": "UOM", "type": "dropdown",
+                 "options": [{"value": k, "label": k} for k in
+                             ["Pcs", "Box", "Kg", "Meter", "Litre", "Set", "Pair"]]},
+                {"name": "hsn_code",  "label": "HSN / SAC Code"},
+                {"name": "tax_id",  "label": "Tax Slab", "type": "dropdown",
+                 "options": [{"value": str(t["id"]), "label": t["name"]} for t in select("taxes", {"company_id": state.company_id})]},
+            ],
+            [
+                {"key": "item_code", "label": "Code"},
+                {"key": "item_name", "label": "Name"},
+                {"key": "uom",       "label": "UOM"},
+                {"key": "hsn_code",  "label": "HSN"},
+                {"key": "tax_id",    "label": "Tax ID"},
+            ],
+            self.save_general_item
+        )
     def save_general_item(self, data):
         data["company_id"] = state.company_id
         (update("general_items", data, {"id": self.edit_id}) and setattr(self, "edit_id", None)) if self.edit_id else insert("general_items", data)
