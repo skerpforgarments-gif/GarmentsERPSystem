@@ -33,7 +33,7 @@ def main(page: ft.Page):
     # -----------------------------
     state.current_user = None
     state.current_company = None
-    state.company_id = "70d3f9f5-ce9e-4e90-9e4a-a48a04c2add4"
+    state.company_id = None
 
     # -----------------------------
     # BASIC CONNECTION CHECK
