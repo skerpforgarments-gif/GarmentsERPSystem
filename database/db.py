@@ -39,6 +39,23 @@ def select(table: str, filters: dict = None):
     res = _execute_with_retry(run)
     return res if res is not None else []
 
+def select_recent(table: str, filters: dict = None, order_by: str = "created_at", limit: int = 10):
+    """Select recent records ordered by a column (descending) with a limit."""
+    def run():
+        query = supabase.table(table).select("*")
+        if filters:
+            for key, value in filters.items():
+                if value is not None:
+                    if isinstance(value, list):
+                        query = query.in_(key, value)
+                    else:
+                        query = query.eq(key, value)
+        query = query.order(order_by, desc=True).limit(limit)
+        return query
+    
+    res = _execute_with_retry(run)
+    return res if res is not None else []
+
 def insert(table: str, data: dict):
     return _execute_with_retry(lambda: supabase.table(table).insert(data))
 
