@@ -23,3 +23,10 @@ Desktop.ini
 backup_*.json
 exports/
 settings.json
+
+# Temporary / Deployment scripts
+venv_temp/
+deploy.zip
+vps_helper.py
+upload_helper.py
+zip_app.py
