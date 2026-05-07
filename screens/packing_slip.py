@@ -459,6 +459,9 @@ class PackingSlipTab(ft.Column):
             
             roff = float(self.round_off.value or 0)
             self.net_amt.value     = f"Total: ₹{val + gst + roff:,.2f}"
+            
+            if self.page:
+                self.update()
         except Exception:
             pass
 

@@ -528,7 +528,11 @@ class OrderEntryTab(ft.Column):
                 meta = self.DISCOUNT_MAP.get(key)
                 if meta:
                     d = float(meta["field"].value or 0)
-                    val -= val * (d / 100)
+                    disc_amt = val * (d / 100)
+                    if "amt" in meta:
+                        meta["amt"].value = f"Amt: ₹{disc_amt:,.2f}"
+                    val -= disc_amt
+
             gst_rate = self._party_gst_rate
             gst      = val * (gst_rate / 100)
             tax_label = self._party_tax_type
@@ -545,6 +549,9 @@ class OrderEntryTab(ft.Column):
             self.gst_amount.value    = f"{tax_label} ({gst_rate:.0f}%): ₹{gst:,.2f}"
             self.round_off.value     = f"{diff:+.2f}"
             self.gross_amount.value  = f"Total: ₹{rounded_total:,.2f}"
+            
+            if self.page:
+                self.update()
         except Exception:
             pass
 
