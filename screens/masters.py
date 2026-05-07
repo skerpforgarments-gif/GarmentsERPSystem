@@ -1,4 +1,5 @@
 import flet as ft
+import json
 from core.theme import AppColors, AppStyles
 
 
@@ -14,25 +15,42 @@ from components.size_matrix import sort_sizes
 # =========================================================
 # INLINE PARTY MASTER FORM
 # =========================================================
-class PartyMasterForm(ft.Container):
+class PartyMasterForm(ft.Stack):
     def __init__(self, on_submit=None):
         super().__init__()
         self.expand = True
-        self.padding = 8
         self.on_submit = on_submit
+        
+        # Internal Modal Layer
+        self.modal_layer = ft.Container(
+            content=ft.Text("Modal"),
+            visible=False,
+            bgcolor="#80000000", # Semi-transparent overlay
+            expand=True,
+            alignment=ft.alignment.center,
+        )
         
         # Unified Styling
         self.style_args = AppStyles.get_input_style()
 
         # --- Basic Info ---
         self.name = ft.TextField(label="Party Name *", width=280, **self.style_args)
-        self.addr1 = ft.TextField(label="Address Line 1", width=280, **self.style_args)
-        self.addr2 = ft.TextField(label="Address Line 2", width=280, **self.style_args)
-        self.addr3 = ft.TextField(label="Address Line 3", width=280, **self.style_args)
+        # Billing Address
+        self.billing_addr1 = ft.TextField(label="Billing Address Line 1", width=280, **self.style_args)
+        self.billing_addr2 = ft.TextField(label="Billing Address Line 2", width=280, **self.style_args)
+        self.billing_addr3 = ft.TextField(label="Billing Address Line 3", width=280, **self.style_args)
         self.city = ft.TextField(label="City", width=160, **self.style_args)
         self.district = ft.TextField(label="District", width=160, **self.style_args)
         self.state_field = ft.TextField(label="State", width=160, **self.style_args)
         self.pincode = ft.TextField(label="Pincode", width=120, **self.style_args)
+        # Delivery Address
+        self.delivery_addr1 = ft.TextField(label="Delivery Address Line 1", width=280, **self.style_args)
+        self.delivery_addr2 = ft.TextField(label="Delivery Address Line 2", width=280, **self.style_args)
+        self.delivery_addr3 = ft.TextField(label="Delivery Address Line 3", width=280, **self.style_args)
+        self.delivery_city = ft.TextField(label="Delivery City", width=160, **self.style_args)
+        self.delivery_district = ft.TextField(label="Delivery District", width=160, **self.style_args)
+        self.delivery_state = ft.TextField(label="Delivery State", width=160, **self.style_args)
+        self.delivery_pincode = ft.TextField(label="Delivery Pincode", width=120, **self.style_args)
         self.code = ft.TextField(label="Code", width=100, **self.style_args)
         self.phone = ft.TextField(label="Phone", width=160, **self.style_args)
         self.mobile = ft.TextField(label="Mobile", width=160, **self.style_args)
@@ -47,7 +65,6 @@ class PartyMasterForm(ft.Container):
         # --- Linked Masters ---
         self.agent_id = ft.Dropdown(label="Select Agent", width=200, **self.style_args)
         self.transporter_id = ft.Dropdown(label="Select Transporter", width=200, **self.style_args)
-        self.destination = ft.TextField(label="Destination", width=160, **self.style_args)
         self.courier_name = ft.TextField(label="Courier Name", width=200, **self.style_args)
         self.reference = ft.TextField(label="Reference", width=160, **self.style_args)
 
@@ -88,14 +105,24 @@ class PartyMasterForm(ft.Container):
 
         # --- Tax Settings ---
         self.tax_type = ft.Dropdown(
-            label="Tax Type", width=140, value="GST", **self.style_args,
-            options=[ft.dropdown.Option("GST"), ft.dropdown.Option("IGST"), ft.dropdown.Option("TCS")]
+            label="Tax Slab", width=220, on_change=self.on_tax_change, **self.style_args
         )
-        self.gst_percent = ft.TextField(label="GST %", width=100, value="0",
-                                         keyboard_type=ft.KeyboardType.NUMBER, **self.style_args)
-        self.igst_percent = ft.TextField(label="IGST %", width=100, value="0",
+        self.tax_details = ft.Text("", size=11, italic=True, color=AppColors.TEXT_SUB)
+        self.cgst_percent = ft.TextField(label="CGST %", width=80, value="0",
                                           keyboard_type=ft.KeyboardType.NUMBER, **self.style_args)
-        self.tcs_applicable = ft.Checkbox(label="TCS", value=False, check_color=AppColors.PRIMARY)
+        self.sgst_percent = ft.TextField(label="SGST %", width=80, value="0",
+                                          keyboard_type=ft.KeyboardType.NUMBER, **self.style_args)
+        self.igst_percent = ft.TextField(label="IGST %", width=80, value="0",
+                                          keyboard_type=ft.KeyboardType.NUMBER, **self.style_args)
+        self.tcs_percent = ft.TextField(label="TCS %", width=80, value="0",
+                                         keyboard_type=ft.KeyboardType.NUMBER, **self.style_args)
+        self.cess_percent = ft.TextField(label="CESS %", width=80, value="0",
+                                          keyboard_type=ft.KeyboardType.NUMBER, **self.style_args)
+        self.gst_percent = ft.TextField(label="Total Rate %", width=100, value="0",
+                                          keyboard_type=ft.KeyboardType.NUMBER, **self.style_args)
+        
+        self.tcs_applicable = ft.Checkbox(label="TCS Appl.", value=False, check_color=AppColors.PRIMARY)
+        self.all_taxes = []
 
         # --- Discounts ---
         self.disc_trade = ft.TextField(label="Trade % (TD)", width=120, value="0",
@@ -108,6 +135,20 @@ class PartyMasterForm(ft.Container):
                                        keyboard_type=ft.KeyboardType.NUMBER, **self.style_args)
         self.disc_cash = ft.TextField(label="Cash % (CD)", width=120, value="0",
                                      keyboard_type=ft.KeyboardType.NUMBER, **self.style_args)
+
+        # --- Discount Order ---
+        # Maps internal keys to human-readable labels and field references
+        self.DISCOUNT_META = {
+            "trade":    {"label": "Trade (TD)",       "field": self.disc_trade},
+            "scheme":   {"label": "Scheme (SPD)",     "field": self.disc_scheme},
+            "festival": {"label": "Festival",         "field": self.disc_festival},
+            "scd":      {"label": "Special (SCD)",    "field": self.disc_special},
+            "cd":       {"label": "Cash (CD)",        "field": self.disc_cash},
+        }
+        self.DEFAULT_DISCOUNT_ORDER = ["trade", "scheme", "festival", "scd", "cd"]
+        self._discount_order = list(self.DEFAULT_DISCOUNT_ORDER)
+        self.discount_order_display = ft.Row(spacing=6, wrap=True)
+        self._refresh_order_display()
 
         # --- Bank Details ---
         self.bank_name = ft.TextField(label="Bank Name", width=220, **self.style_args)
@@ -155,55 +196,96 @@ class PartyMasterForm(ft.Container):
                 margin=ft.margin.only(bottom=20)
             )
 
-        self.content = ft.Column(
-            scroll=ft.ScrollMode.AUTO,
+        # --- Main Layout Container ---
+        self.form_container = ft.Container(
+            padding=8,
             expand=True,
-            spacing=0,
-            controls=[
-                section("Basic Information", [
-                    ft.Row([self.name, self.code], spacing=10, wrap=True),
-                    ft.Row([self.addr1, self.addr2], spacing=10, wrap=True),
-                    ft.Row([self.addr3], spacing=10, wrap=True),
-                    ft.Row([self.city, self.district, self.state_field, self.pincode], spacing=10, wrap=True),
-                    ft.Row([self.phone, self.mobile, self.fax, self.email], spacing=10, wrap=True),
-                ]),
-                section("Tax Information", [
-                    ft.Row([self.gstin, self.cst_no, self.pan_no], spacing=10, wrap=True),
-                ]),
-                section("Logistics", [
-                    ft.Row([self.agent_id, self.transporter_id, self.destination, self.courier_name], spacing=10, wrap=True),
-                    ft.Row([self.documents_thro, self.order_thro, self.reference], spacing=10, wrap=True),
-                ]),
-                section("Financial Terms", [
-                    ft.Row([self.opening_balance, self.opn_bal_type, self.for_allowed], spacing=10, wrap=True),
-                    ft.Row([self.credit_days, self.credit_limit, self.price_list_id, self.price_type], spacing=10, wrap=True),
-                ]),
-                section("Tax Settings", [
-                    ft.Row([self.tax_type, self.gst_percent, self.igst_percent, self.tcs_applicable], spacing=10, wrap=True),
-                ]),
-                section("Discount Structure (Calculated Sequentially)", [
-                    ft.Row([self.disc_trade, self.disc_scheme, self.disc_festival, self.disc_special, self.disc_cash], spacing=10, wrap=True),
-                ]),
-                section("Bank Details", [
-                    ft.Row([self.bank_name, self.bank_acc, self.bank_ifsc], spacing=10, wrap=True),
-                ]),
-                section("Status & Remarks", [
-                    ft.Row([self.remarks, self.status_radio], spacing=25, vertical_alignment=ft.CrossAxisAlignment.CENTER),
-                ]),
-                ft.Row([save_btn, clear_btn], spacing=12, wrap=True),
-            ]
+            content=ft.Column(
+                scroll=ft.ScrollMode.AUTO,
+                expand=True,
+                spacing=0,
+                controls=[
+                    section("Basic Information", [
+                        ft.Row([self.name, self.code], spacing=10, wrap=True),
+                        ft.Row([self.phone, self.mobile, self.fax, self.email], spacing=10, wrap=True),
+                    ]),
+                    section("Billing Address", [
+                        ft.Row([self.billing_addr1, self.billing_addr2], spacing=10, wrap=True),
+                        ft.Row([self.billing_addr3], spacing=10, wrap=True),
+                        ft.Row([self.city, self.district, self.state_field, self.pincode], spacing=10, wrap=True),
+                    ]),
+                    section("Delivery Address", [
+                        ft.Row([self.delivery_addr1, self.delivery_addr2], spacing=10, wrap=True),
+                        ft.Row([self.delivery_addr3], spacing=10, wrap=True),
+                        ft.Row([self.delivery_city, self.delivery_district, self.delivery_state, self.delivery_pincode], spacing=10, wrap=True),
+                    ]),
+                    section("Tax Information", [
+                        ft.Row([self.gstin, self.cst_no, self.pan_no], spacing=10, wrap=True),
+                    ]),
+                    section("Logistics", [
+                        ft.Row([self.agent_id, self.transporter_id, self.courier_name], spacing=10, wrap=True),
+                        ft.Row([self.documents_thro, self.order_thro, self.reference], spacing=10, wrap=True),
+                    ]),
+                    section("Financial Terms", [
+                        ft.Row([self.opening_balance, self.opn_bal_type, self.for_allowed], spacing=10, wrap=True),
+                        ft.Row([self.credit_days, self.credit_limit, self.price_list_id, self.price_type], spacing=10, wrap=True),
+                    ]),
+                    section("Tax Settings", [
+                        ft.Column([
+                            ft.Row([self.tax_type, self.tax_details], vertical_alignment=ft.CrossAxisAlignment.CENTER),
+                            ft.Row([
+                                self.cgst_percent, self.sgst_percent, self.igst_percent, 
+                                self.tcs_percent, self.cess_percent, self.gst_percent,
+                                self.tcs_applicable
+                            ], spacing=10, wrap=True),
+                        ], spacing=10)
+                    ]),
+                    section("Discount Structure (Calculated Sequentially)", [
+                        ft.Row([self.disc_trade, self.disc_scheme, self.disc_festival, self.disc_special, self.disc_cash], spacing=10, wrap=True),
+                        ft.Divider(height=1, color="#F1F5F9"),
+                        ft.Text("DISCOUNT APPLICATION ORDER", weight="bold", size=10, color=AppColors.PRIMARY, style=ft.TextStyle(letter_spacing=1.0)),
+                        ft.Text("Discounts are applied sequentially in this order (left → right).", size=11, color=AppColors.TEXT_SUB, italic=True),
+                        ft.Row([
+                            self.discount_order_display,
+                            ft.OutlinedButton("Change Order", icon=ft.icons.SWAP_VERT, on_click=self._open_order_picker,
+                                              style=ft.ButtonStyle(color=AppColors.PRIMARY, side=ft.BorderSide(1, AppColors.PRIMARY))),
+                            ft.TextButton("Reset to Default", icon=ft.icons.RESTART_ALT, on_click=self._reset_order,
+                                          style=ft.ButtonStyle(color=AppColors.TEXT_SUB)),
+                        ], spacing=15, vertical_alignment=ft.CrossAxisAlignment.CENTER, wrap=True),
+                    ]),
+                    section("Bank Details", [
+                        ft.Row([self.bank_name, self.bank_acc, self.bank_ifsc], spacing=10, wrap=True),
+                    ]),
+                    section("Status & Remarks", [
+                        ft.Row([self.remarks, self.status_radio], spacing=25, vertical_alignment=ft.CrossAxisAlignment.CENTER),
+                    ]),
+                    ft.Row([save_btn, clear_btn], spacing=12, wrap=True),
+                ]
+            )
         )
+
+        self.controls = [
+            self.form_container,
+            self.modal_layer
+        ]
 
     def get_values(self):
         return {
             "name": self.name.value or "",
-            "address_line1": self.addr1.value or "",
-            "address_line2": self.addr2.value or "",
-            "address_line3": self.addr3.value or "",
-            "city": self.city.value or "",
-            "district": self.district.value or "",
-            "state": self.state_field.value or "",
-            "pincode": self.pincode.value or "",
+            "billing_address_line1": self.billing_addr1.value or "",
+            "billing_address_line2": self.billing_addr2.value or "",
+            "billing_address_line3": self.billing_addr3.value or "",
+            "billing_city": self.city.value or "",
+            "billing_district": self.district.value or "",
+            "billing_state": self.state_field.value or "",
+            "billing_pincode": self.pincode.value or "",
+            "delivery_address_line1": self.delivery_addr1.value or "",
+            "delivery_address_line2": self.delivery_addr2.value or "",
+            "delivery_address_line3": self.delivery_addr3.value or "",
+            "delivery_city": self.delivery_city.value or "",
+            "delivery_district": self.delivery_district.value or "",
+            "delivery_state": self.delivery_state.value or "",
+            "delivery_pincode": self.delivery_pincode.value or "",
             "code": self.code.value or "",
             "phone": self.phone.value or "",
             "mobile": self.mobile.value or "",
@@ -212,7 +294,6 @@ class PartyMasterForm(ft.Container):
             "gstin": self.gstin.value or "",
             "cst_no": self.cst_no.value or "",
             "pan_no": self.pan_no.value or "",
-            "destination": self.destination.value or "",
             "courier_name": self.courier_name.value or "",
             "reference": self.reference.value or "",
             "agent_id": self.agent_id.value,
@@ -227,14 +308,20 @@ class PartyMasterForm(ft.Container):
             "credit_limit": float(self.credit_limit.value or 0),
             "price_type": self.price_type.value or "Wholesale",
             "tax_type": self.tax_type.value or "GST",
-            "gst_percent": float(self.gst_percent.value or 0),
-            "igst_percent": float(self.igst_percent.value or 0),
+            "igst_percent": self.igst_percent.value or "0",
+            "cgst_percent": self.cgst_percent.value or "0",
+            "sgst_percent": self.sgst_percent.value or "0",
+            "tcs_percent": self.tcs_percent.value or "0",
+            "cess_percent": self.cess_percent.value or "0",
+            "gst_percent": self.gst_percent.value or "0",
+            "rate_percent": self.gst_percent.value or "0",
             "tcs_applicable": self.tcs_applicable.value,
             "discount_trade": float(self.disc_trade.value or 0),
             "discount_scheme": float(self.disc_scheme.value or 0),
             "discount_festival": float(self.disc_festival.value or 0),
             "discount_scd": float(self.disc_special.value or 0),
             "discount_cd": float(self.disc_cash.value or 0),
+            "discount_order": json.dumps(self._discount_order),
             "bank_name": self.bank_name.value or "",
             "bank_account_no": self.bank_acc.value or "",
             "bank_ifsc": self.bank_ifsc.value or "",
@@ -243,24 +330,47 @@ class PartyMasterForm(ft.Container):
             "is_blocked": self.status_radio.value == "Blocked",
         }
 
-    def load_metadata(self, agents, transporters, price_lists):
+    def load_metadata(self, agents, transporters, price_lists, taxes=None):
         self.agent_id.options = [ft.dropdown.Option(key=str(a["id"]), text=a["name"]) for a in agents]
         self.transporter_id.options = [ft.dropdown.Option(key=str(t["id"]), text=t["name"]) for t in transporters]
         self.price_list_id.options = [ft.dropdown.Option(key=str(p["id"]), text=p["list_name"]) for p in price_lists]
+        self.all_taxes = taxes or []
+        if taxes:
+            self.tax_type.options = [ft.dropdown.Option(t["name"]) for t in taxes]
         try:
             self.update()
         except:
             pass
 
+    def on_tax_change(self, e):
+        tax_name = self.tax_type.value
+        tax = next((t for t in self.all_taxes if t["name"] == tax_name), None)
+        if tax:
+            self.cgst_percent.value = str(tax.get("cgst_percent", 0))
+            self.sgst_percent.value = str(tax.get("sgst_percent", 0))
+            self.igst_percent.value = str(tax.get("igst_percent", 0))
+            self.tcs_percent.value = str(tax.get("tcs_percent", 0))
+            self.cess_percent.value = str(tax.get("cess_percent", 0))
+            self.gst_percent.value = str(tax.get("rate_percent", 0))
+            self.tax_details.value = f"Type: {tax.get('tax_type')} | Total: {tax.get('rate_percent')}%"
+            self.update()
+
     def set_values(self, data: dict):
         self.name.value = data.get("name", "")
-        self.addr1.value = data.get("address_line1", "")
-        self.addr2.value = data.get("address_line2", "")
-        self.addr3.value = data.get("address_line3", "")
-        self.city.value = data.get("city", "")
-        self.district.value = data.get("district", "")
-        self.state_field.value = data.get("state", "")
-        self.pincode.value = data.get("pincode", "")
+        self.billing_addr1.value = data.get("billing_address_line1", "")
+        self.billing_addr2.value = data.get("billing_address_line2", "")
+        self.billing_addr3.value = data.get("billing_address_line3", "")
+        self.city.value = data.get("billing_city", "")
+        self.district.value = data.get("billing_district", "")
+        self.state_field.value = data.get("billing_state", "")
+        self.pincode.value = data.get("billing_pincode", "")
+        self.delivery_addr1.value = data.get("delivery_address_line1", "")
+        self.delivery_addr2.value = data.get("delivery_address_line2", "")
+        self.delivery_addr3.value = data.get("delivery_address_line3", "")
+        self.delivery_city.value = data.get("delivery_city", "")
+        self.delivery_district.value = data.get("delivery_district", "")
+        self.delivery_state.value = data.get("delivery_state", "")
+        self.delivery_pincode.value = data.get("delivery_pincode", "")
         self.code.value = data.get("code", "")
         self.phone.value = data.get("phone", "")
         self.mobile.value = data.get("mobile", "")
@@ -269,7 +379,6 @@ class PartyMasterForm(ft.Container):
         self.gstin.value = data.get("gstin", "")
         self.cst_no.value = data.get("cst_no", "")
         self.pan_no.value = data.get("pan_no", "")
-        self.destination.value = data.get("destination", "")
         self.courier_name.value = data.get("courier_name", "")
         self.reference.value = data.get("reference", "")
         
@@ -289,14 +398,33 @@ class PartyMasterForm(ft.Container):
         self.credit_limit.value = str(data.get("credit_limit", 0))
         self.price_type.value = data.get("price_type", "Wholesale")
         self.tax_type.value = data.get("tax_type", "GST")
-        self.gst_percent.value = str(data.get("gst_percent", 0))
         self.igst_percent.value = str(data.get("igst_percent", 0))
+        self.cgst_percent.value = str(data.get("cgst_percent", 0))
+        self.sgst_percent.value = str(data.get("sgst_percent", 0))
+        self.tcs_percent.value = str(data.get("tcs_percent", 0))
+        self.cess_percent.value = str(data.get("cess_percent", 0))
+        self.gst_percent.value = str(data.get("gst_percent") or data.get("rate_percent", 0))
         self.tcs_applicable.value = data.get("tcs_applicable", False)
         self.disc_trade.value = str(data.get("discount_trade", 0))
         self.disc_scheme.value = str(data.get("discount_scheme", 0))
         self.disc_festival.value = str(data.get("discount_festival", 0))
         self.disc_special.value = str(data.get("discount_scd", 0))
         self.disc_cash.value = str(data.get("discount_cd", 0))
+        # Load discount order
+        raw_order = data.get("discount_order")
+        if raw_order:
+            if isinstance(raw_order, str):
+                try:
+                    self._discount_order = json.loads(raw_order)
+                except Exception:
+                    self._discount_order = list(self.DEFAULT_DISCOUNT_ORDER)
+            elif isinstance(raw_order, list):
+                self._discount_order = list(raw_order)
+            else:
+                self._discount_order = list(self.DEFAULT_DISCOUNT_ORDER)
+        else:
+            self._discount_order = list(self.DEFAULT_DISCOUNT_ORDER)
+        self._refresh_order_display()
         self.bank_name.value = data.get("bank_name", "")
         self.bank_acc.value = data.get("bank_account_no", "")
         self.bank_ifsc.value = data.get("bank_ifsc", "")
@@ -322,6 +450,172 @@ class PartyMasterForm(ft.Container):
         self.name.error_text = None
         if self.on_submit:
             self.on_submit(self.get_values())
+
+    # ─── Discount Order Picker ────────────────────────────────
+    def _refresh_order_display(self):
+        """Rebuild the visual badges showing the current discount order."""
+        self.discount_order_display.controls = []
+        for idx, key in enumerate(self._discount_order):
+            meta = self.DISCOUNT_META.get(key, {})
+            label = meta.get("label", key)
+            self.discount_order_display.controls.append(
+                ft.Container(
+                    content=ft.Row([
+                        ft.Container(
+                            content=ft.Text(str(idx + 1), size=10, weight="bold", color=ft.colors.WHITE),
+                            bgcolor=AppColors.PRIMARY,
+                            border_radius=10,
+                            width=20, height=20,
+                            alignment=ft.alignment.center,
+                        ),
+                        ft.Text(label, size=12, weight="w500"),
+                    ], spacing=6, vertical_alignment=ft.CrossAxisAlignment.CENTER),
+                    bgcolor="#EEF2FF",
+                    border_radius=6,
+                    padding=ft.padding.symmetric(horizontal=10, vertical=6),
+                    border=ft.border.all(1, "#C7D2FE"),
+                )
+            )
+            if idx < len(self._discount_order) - 1:
+                self.discount_order_display.controls.append(
+                    ft.Icon(ft.icons.ARROW_FORWARD, size=14, color="#94A3B8")
+                )
+
+    def _reset_order(self, e):
+        """Reset the discount order to default."""
+        self._discount_order = list(self.DEFAULT_DISCOUNT_ORDER)
+        self._refresh_order_display()
+        try:
+            self.update()
+        except Exception:
+            pass
+
+    def _open_order_picker(self, e):
+        """Open a modal to let the user pick the discount application order step-by-step."""
+        pending = list(self.DEFAULT_DISCOUNT_ORDER)  # All 5 available initially
+        chosen = []  # Will be built up as user picks
+
+        chosen_col = ft.Column(spacing=8)
+        available_col = ft.Column(spacing=8)
+        instruction_text = ft.Text("Select discount #1 (applied first):", size=13, weight="w500", color=AppColors.PRIMARY)
+
+        def _rebuild_ui():
+            # Instruction
+            step = len(chosen) + 1
+            if step <= 5:
+                ordinal = ["1st", "2nd", "3rd", "4th", "5th"][step - 1]
+                instruction_text.value = f"Select the {ordinal} discount to apply:"
+            else:
+                instruction_text.value = "✅ All discounts ordered!"
+
+            # Chosen list with numbered badges
+            chosen_col.controls = []
+            for idx, key in enumerate(chosen):
+                meta = self.DISCOUNT_META.get(key, {})
+                label = meta.get("label", key)
+                chosen_col.controls.append(
+                    ft.Container(
+                        content=ft.Row([
+                            ft.Container(
+                                content=ft.Text(str(idx + 1), size=11, weight="bold", color=ft.colors.WHITE),
+                                bgcolor=AppColors.PRIMARY,
+                                border_radius=12,
+                                width=24, height=24,
+                                alignment=ft.alignment.center,
+                            ),
+                            ft.Text(label, size=13, weight="w500"),
+                        ], spacing=10),
+                        bgcolor="#EEF2FF",
+                        border_radius=8,
+                        padding=ft.padding.symmetric(horizontal=14, vertical=8),
+                        border=ft.border.all(1, "#C7D2FE"),
+                    )
+                )
+
+            # Available buttons
+            available_col.controls = []
+            for key in pending:
+                meta = self.DISCOUNT_META.get(key, {})
+                label = meta.get("label", key)
+                available_col.controls.append(
+                    ft.ElevatedButton(
+                        label, icon=ft.icons.ADD_CIRCLE_OUTLINE,
+                        on_click=lambda e, k=key: _pick(k),
+                        style=ft.ButtonStyle(
+                            bgcolor=ft.colors.WHITE,
+                            color=AppColors.PRIMARY,
+                            side=ft.BorderSide(1, AppColors.PRIMARY),
+                            shape=ft.RoundedRectangleBorder(radius=8),
+                        ),
+                        height=40,
+                    )
+                )
+            try:
+                self.update()
+            except Exception:
+                pass
+
+        def _pick(key):
+            pending.remove(key)
+            chosen.append(key)
+            _rebuild_ui()
+
+        def _confirm(e):
+            if len(chosen) == 5:
+                self._discount_order = list(chosen)
+                self._refresh_order_display()
+            self.modal_layer.visible = False
+            self.update()
+
+        def _reset_picker(e):
+            pending.clear()
+            pending.extend(self.DEFAULT_DISCOUNT_ORDER)
+            chosen.clear()
+            _rebuild_ui()
+
+        _rebuild_ui()  # Initial state
+
+        # Create a container-based dialog instead of ft.AlertDialog
+        dialog_content = ft.Container(
+            content=ft.Column([
+                ft.Row([
+                    ft.Text("Set Discount Application Order", weight="bold", size=16),
+                    ft.IconButton(ft.icons.CLOSE, on_click=lambda _: _close_dlg())
+                ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
+                ft.Text("Pick discounts one by one to set the order they are applied during billing.",
+                        size=12, color=AppColors.TEXT_SUB, italic=True),
+                ft.Divider(height=1, color="#E2E8F0"),
+                instruction_text,
+                ft.Text("Available:", size=11, weight="bold", color="#64748B"),
+                available_col,
+                ft.Container(height=10),
+                ft.Text("Selected Order:", size=11, weight="bold", color=AppColors.PRIMARY),
+                chosen_col,
+                ft.Divider(height=1, color="#E2E8F0"),
+                ft.Row([
+                    ft.TextButton("Reset", icon=ft.icons.RESTART_ALT, on_click=_reset_picker),
+                    ft.Row([
+                        ft.TextButton("Cancel", on_click=lambda _: _close_dlg()),
+                        ft.ElevatedButton("Confirm", icon=ft.icons.CHECK, on_click=_confirm,
+                                          style=AppStyles.primary_button_style()),
+                    ], spacing=10)
+                ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN)
+            ], scroll=ft.ScrollMode.AUTO, spacing=10),
+            bgcolor=ft.colors.WHITE,
+            padding=20,
+            border_radius=12,
+            width=450,
+            height=500,
+            shadow=ft.BoxShadow(blur_radius=20, color="#40000000"),
+        )
+
+        def _close_dlg():
+            self.modal_layer.visible = False
+            self.update()
+
+        self.modal_layer.content = dialog_content
+        self.modal_layer.visible = True
+        self.update()
 
 
 # =========================================================
@@ -491,6 +785,8 @@ class MastersScreen(ft.Container):
         for item in data:
             stock = item.get("opening_stock", {})
             item["total_stock"] = sum(int(v) for v in stock.values() if str(v).isdigit()) if isinstance(stock, dict) else 0
+            item["status_str"] = "Blocked" if item.get("is_blocked") else "Approved"
+            item["sizes_str"] = ", ".join(item.get("sizes", [])) if isinstance(item.get("sizes"), list) else ""
 
         table = TableBuilder(
             [
@@ -502,8 +798,13 @@ class MastersScreen(ft.Container):
                 {"key": "total_stock", "label": "Opn Stock"},
                 {"key": "pcs_per_inner_box", "label": "Inner"},
                 {"key": "boxes_per_outer_box", "label": "Outer"},
+                {"key": "box_type", "label": "Box Type"},
                 {"key": "hsn_code", "label": "HSN"},
                 {"key": "tax_name", "label": "Tax Slab"},
+                {"key": "item_order", "label": "Order"},
+                {"key": "status_str", "label": "Status"},
+                {"key": "reason", "label": "Reason/Remarks"},
+                {"key": "sizes_str", "label": "Sizes"},
             ],
             data, on_edit=self.edit_item, on_delete=self.delete_item
         )
@@ -609,7 +910,12 @@ class MastersScreen(ft.Container):
     # =========================================================
     def load_parties(self):
         self.form = PartyMasterForm(on_submit=self.save_party)
-        self.form.load_metadata(select("agents", {"company_id": state.company_id}), select("transporters", {"company_id": state.company_id}), select("price_lists", {"company_id": state.company_id}))
+        self.form.load_metadata(
+            select("agents", {"company_id": state.company_id}), 
+            select("transporters", {"company_id": state.company_id}), 
+            select("price_lists", {"company_id": state.company_id}),
+            select("taxes", {"company_id": state.company_id})
+        )
         data = select("parties", {"company_id": state.company_id})
         # Resolve Agent/Transporter/PriceList names for the table
         agents = select("agents", {"company_id": state.company_id})
@@ -626,23 +932,44 @@ class MastersScreen(ft.Container):
             p["price_list_name"] = plist_map.get(str(p.get("price_list_id")), "-")
             # Combined discount display
             p["discounts"] = f"T:{p.get('discount_trade',0)} S:{p.get('discount_scheme',0)} F:{p.get('discount_festival',0)} SP:{p.get('discount_scd',0)} C:{p.get('discount_cd',0)}"
-            p["full_address"] = f"{p.get('address_line1','')}, {p.get('city','')}"
+            p["full_billing"] = f"{p.get('billing_address_line1','')}, {p.get('billing_address_line2','')}, {p.get('billing_address_line3','')}, {p.get('billing_city','')}, {p.get('billing_state','')}"
+            p["full_delivery"] = f"{p.get('delivery_address_line1','')}, {p.get('delivery_address_line2','')}, {p.get('delivery_address_line3','')}, {p.get('delivery_city','')}, {p.get('delivery_state','')}"
+            p["status_str"] = "Blocked" if p.get("is_blocked") else "Approved"
+            p["for_str"] = "Yes" if p.get("for_allowed") else "No"
+            p["tcs_str"] = "Yes" if p.get("tcs_applicable") else "No"
+            p["opn_bal_display"] = f"{p.get('opening_balance',0)} ({p.get('opn_bal_type','DEBIT')})"
 
         table = TableBuilder(
             [
                 {"key": "code", "label": "Code"},
                 {"key": "name", "label": "Name"},
                 {"key": "mobile", "label": "Mobile"},
-                {"key": "full_address", "label": "Address"},
+                {"key": "phone", "label": "Phone"},
+                {"key": "email", "label": "Email"},
+                {"key": "full_billing", "label": "Billing Address"},
+                {"key": "full_delivery", "label": "Delivery Address"},
                 {"key": "gstin", "label": "GSTIN"},
+                {"key": "pan_no", "label": "PAN"},
+                {"key": "cst_no", "label": "CST"},
                 {"key": "agent_name", "label": "Agent"},
                 {"key": "transporter_name", "label": "Transporter"},
+                {"key": "destination", "label": "Destination"},
+                {"key": "courier_name", "label": "Courier"},
                 {"key": "price_list_name", "label": "Price List"},
-                {"key": "price_type", "label": "Type"},
-                {"key": "discounts", "label": "Discounts (%)"},
+                {"key": "price_type", "label": "Price Type"},
+                {"key": "opn_bal_display", "label": "Opn Balance"},
                 {"key": "credit_days", "label": "Cr. Days"},
                 {"key": "credit_limit", "label": "Cr. Limit"},
+                {"key": "discounts", "label": "Discounts (%)"},
+                {"key": "tax_type", "label": "Tax Type"},
+                {"key": "gst_percent", "label": "GST %"},
+                {"key": "igst_percent", "label": "IGST %"},
+                {"key": "tcs_str", "label": "TCS"},
                 {"key": "bank_name", "label": "Bank"},
+                {"key": "bank_account_no", "label": "Account"},
+                {"key": "bank_ifsc", "label": "IFSC"},
+                {"key": "status_str", "label": "Status"},
+                {"key": "remarks", "label": "Remarks"},
             ],
             data, on_edit=self.edit_party, on_delete=self.delete_party
         )
@@ -746,6 +1073,7 @@ class MastersScreen(ft.Container):
                 {"name": "sgst_percent",  "label": "SGST %",   "type": "number", "default": "0"},
                 {"name": "igst_percent",  "label": "IGST %",   "type": "number", "default": "0"},
                 {"name": "tcs_percent",   "label": "TCS %",    "type": "number", "default": "0"},
+                {"name": "cess_percent",  "label": "CESS %",   "type": "number", "default": "0"},
                 {"name": "rate_percent",  "label": "Total Tax Rate %", "type": "number", "default": "0"},
             ],
             [
@@ -756,13 +1084,14 @@ class MastersScreen(ft.Container):
                 {"key": "sgst_percent","label": "SGST %"},
                 {"key": "igst_percent","label": "IGST %"},
                 {"key": "tcs_percent", "label": "TCS %"},
+                {"key": "cess_percent","label": "CESS %"},
                 {"key": "rate_percent","label": "Total Rate %"},
             ],
             self.save_tax
         )
     def save_tax(self, data):
         data["company_id"] = state.company_id
-        for pct_field in ["cgst_percent", "sgst_percent", "igst_percent", "tcs_percent", "rate_percent"]:
+        for pct_field in ["cgst_percent", "sgst_percent", "igst_percent", "tcs_percent", "cess_percent", "rate_percent"]:
             try: data[pct_field] = float(data.get(pct_field) or 0)
             except: data[pct_field] = 0.0
         (update("taxes", data, {"id": self.edit_id}) and setattr(self, "edit_id", None)) if self.edit_id else insert("taxes", data)
@@ -823,27 +1152,48 @@ class MastersScreen(ft.Container):
         self.close_modal(); self.load_expense_ledgers()
 
     def load_general_items(self):
-        self._generic_loader(
-            "general_items",
-            [
-                {"name": "item_code", "label": "Code"},
-                {"name": "item_name", "label": "Name *", "required": True},
-                {"name": "uom",       "label": "UOM", "type": "dropdown",
-                 "options": [{"value": k, "label": k} for k in
-                             ["Pcs", "Box", "Kg", "Meter", "Litre", "Set", "Pair"]]},
-                {"name": "hsn_code",  "label": "HSN / SAC Code"},
-                {"name": "tax_id",  "label": "Tax Slab", "type": "dropdown",
-                 "options": [{"value": str(t["id"]), "label": t["name"]} for t in select("taxes", {"company_id": state.company_id})]},
-            ],
-            [
-                {"key": "item_code", "label": "Code"},
-                {"key": "item_name", "label": "Name"},
-                {"key": "uom",       "label": "UOM"},
-                {"key": "hsn_code",  "label": "HSN"},
-                {"key": "tax_id",    "label": "Tax ID"},
-            ],
-            self.save_general_item
-        )
+        taxes = select("taxes", {"company_id": state.company_id})
+
+        def on_tax_change(e):
+            tid = e.control.value
+            tax = next((t for t in taxes if str(t["id"]) == tid), None)
+            if tax:
+                info_ctrl = self.form.controls_map.get("tax_info")
+                hsn_ctrl = self.form.controls_map.get("hsn_code")
+                if info_ctrl:
+                    info_ctrl.value = f"{tax.get('tax_type')} | C:{tax.get('cgst_percent')}% S:{tax.get('sgst_percent')}% I:{tax.get('igst_percent',0)}%"
+                    info_ctrl.update()
+                if hsn_ctrl and not hsn_ctrl.value and tax.get("hsn_code"):
+                    hsn_ctrl.value = tax["hsn_code"]
+                    hsn_ctrl.update()
+
+        self.form = FormBuilder([
+            {"name": "item_code", "label": "Code"},
+            {"name": "item_name", "label": "Name *", "required": True},
+            {"name": "uom",       "label": "UOM", "type": "dropdown",
+             "options": [{"value": k, "label": k} for k in ["Pcs", "Box", "Kg", "Meter", "Litre", "Set", "Pair"]]},
+            {"name": "hsn_code",  "label": "HSN / SAC Code"},
+            {"name": "tax_id",    "label": "Tax Slab", "type": "dropdown", "on_change": on_tax_change,
+             "options": [{"value": str(t["id"]), "label": t["name"]} for t in taxes]},
+            {"name": "tax_info",  "label": "", "type": "info"}
+        ], on_submit=self.save_general_item)
+        
+        data = select("general_items", {"company_id": state.company_id})
+        tax_map = {str(t["id"]): t["name"] for t in taxes}
+        for item in data:
+            item["tax_name"] = tax_map.get(str(item.get("tax_id")), "-")
+
+        table = TableBuilder([
+            {"key": "item_code", "label": "Code"},
+            {"key": "item_name", "label": "Name"},
+            {"key": "uom",       "label": "UOM"},
+            {"key": "hsn_code",  "label": "HSN"},
+            {"key": "tax_name",  "label": "Tax Slab"},
+        ], data, on_edit=self._generic_edit, on_delete=lambda r: self._generic_delete("general_items", r))
+        
+        self.form_area.content, self.table_area.content = self.form, table
+        self._refresh()
+
     def save_general_item(self, data):
         data["company_id"] = state.company_id
         (update("general_items", data, {"id": self.edit_id}) and setattr(self, "edit_id", None)) if self.edit_id else insert("general_items", data)

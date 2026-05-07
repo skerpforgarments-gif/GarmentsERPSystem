@@ -25,18 +25,18 @@ class SizeMatrixModal(ft.AlertDialog):
         self.title = ft.Text("Select Item & Sizes")
         
         # --- Refs ---
-        self.item_dd = ft.Dropdown(label="Search Item", expand=True, on_change=self.on_item_select, **AppStyles.get_input_style())
-        self.matrix_container = ft.Column(spacing=20, scroll=ft.ScrollMode.AUTO)
+        self.item_dd = ft.Dropdown(label="Search Item", width=600, on_change=self.on_item_select, **AppStyles.get_input_style())
+        self.matrix_container = ft.Column(spacing=20, scroll=ft.ScrollMode.AUTO, expand=True)
         self.price_list_id = None
         self.price_type = "Wholesale"  # Default
         
         self.content = ft.Container(
             content=ft.Column([
-                self.item_dd,
-                ft.Divider(),
+                ft.Row([self.item_dd], alignment=ft.MainAxisAlignment.CENTER),
+                ft.Divider(height=1, color="#F1F5F9"),
                 self.matrix_container
-            ], width=600, height=500, tight=True),
-            padding=10
+            ], width=750, height=650, spacing=15),
+            padding=20
         )
         
         self.actions = [
@@ -46,6 +46,12 @@ class SizeMatrixModal(ft.AlertDialog):
         
         self.matrix_data = {} # To store the text fields: {size_val: TextField}
 
+    def reset(self):
+        self.item_dd.value = None
+        self.matrix_container.controls.clear()
+        self.matrix_data.clear()
+        if self.page: self.update()
+
     def close_modal(self, e=None):
         self.open = False
         if self.page: self.page.update()
@@ -54,46 +60,64 @@ class SizeMatrixModal(ft.AlertDialog):
         self.item_dd.options = [ft.dropdown.Option(key=str(i["id"]), text=f"{i['item_name']} ({i['item_code']})") for i in items]
         if self.page: self.update()
 
+    def on_tf_focus(self, e):
+        if e.control.value == "0":
+            e.control.value = ""
+            e.control.update()
+
+    def on_tf_blur(self, e):
+        if e.control.value == "" or e.control.value is None:
+            e.control.value = "0"
+            e.control.update()
+
     def on_item_select(self, e):
-        item_id = self.item_dd.value
-        if not item_id or not self.price_list_id: return
+        if not self.item_dd.value:
+            return
+            
+        # Get prices for this item
+        prices = select("price_list_items", {
+            "price_list_id": self.price_list_id,
+            "item_id": self.item_dd.value
+        })
         
-        # 1. Fetch Item Sizes
-        item_data = select("items", {"id": item_id})
-        if not item_data: return
-        all_sizes = item_data[0].get("sizes", [])
-        
-        # 2. Fetch Price List Rates for this Item
-        rates_data = select("price_list_items", {"price_list_id": self.price_list_id, "item_id": item_id})
-        rates_map = {r["size_value"]: r.get(f"{self.price_type.lower()}_rate", 0) for r in rates_data}
-        
-        # 3. Group sizes by Rate
-        groups = {} # {rate: [sizes]}
-        for s in sort_sizes(all_sizes):
-            rate = rates_map.get(s, 0)
-            if rate not in groups: groups[rate] = []
-            groups[rate].append(s)
-        
-        # 4. Render Matrix
+        # Group by rate
+        rate_map = {}
+        for p in prices:
+            r = p.get("wholesale_rate" if self.price_type == "Wholesale" else "retail_rate", 0)
+            if r not in rate_map: rate_map[r] = []
+            rate_map[r].append(p.get("size_value"))
+
         self.matrix_container.controls.clear()
         self.matrix_data.clear()
-        
-        for rate, sizes in sorted(groups.items(), key=lambda x: _size_sort_key(sort_sizes(x[1])[0])):
+
+        for rate, sizes in rate_map.items():
             size_controls = []
             for s in sort_sizes(sizes):
                 tf = ft.TextField(
                     label=s, width=70, height=40, dense=True, 
                     text_size=12, text_align=ft.TextAlign.CENTER,
-                    keyboard_type=ft.KeyboardType.NUMBER
+                    keyboard_type=ft.KeyboardType.NUMBER,
+                    value="0",
+                    on_focus=self.on_tf_focus,
+                    on_blur=self.on_tf_blur
                 )
                 self.matrix_data[s] = {"tf": tf, "rate": rate}
                 size_controls.append(tf)
             
             self.matrix_container.controls.append(
-                ft.Column([
-                    ft.Text(f"Rate: ₹{rate}", weight="bold", size=13, color=AppColors.PRIMARY),
-                    ft.Row(size_controls, wrap=True, spacing=10)
-                ], spacing=10)
+                ft.Container(
+                    padding=15,
+                    bgcolor="#F8FAFC",
+                    border_radius=10,
+                    border=ft.border.all(1, "#E2E8F0"),
+                    content=ft.Column([
+                        ft.Row([
+                            ft.Icon(ft.icons.PAYMENTS, size=16, color=AppColors.PRIMARY),
+                            ft.Text(f"Rate: ₹{rate}", weight="bold", size=14, color=AppColors.TEXT_HEADER),
+                        ], spacing=8),
+                        ft.Row(size_controls, wrap=True, spacing=15, run_spacing=15)
+                    ], spacing=12)
+                )
             )
         
         if self.page: self.update()

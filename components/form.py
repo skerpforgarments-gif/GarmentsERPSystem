@@ -80,17 +80,24 @@ class FormBuilder(ft.Container):
             options = field.get("options", [])
             return ft.Dropdown(
                 **style_args,
+                on_change=field.get("on_change"),
                 options=[
                     ft.dropdown.Option(key=str(opt["value"]), text=opt["label"])
                     for opt in options
                 ]
             )
         
+        elif f_type == "info":
+            return ft.Text(label, size=12, color=AppColors.TEXT_SUB, italic=True)
+
         return ft.TextField(**style_args)
 
     def get_values(self):
         data = {}
-        for name, ctrl in self.controls_map.items():
+        for field in self.fields_config:
+            if field.get("type") == "info": continue
+            name = field["name"]
+            ctrl = self.controls_map[name]
             value = ctrl.value
             data[name] = value if value not in ["", None] else None
         return data

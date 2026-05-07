@@ -34,6 +34,7 @@ def main(page: ft.Page):
     state.current_user = None
     state.current_company = None
     state.company_id = None
+    state.page = page  # Allow state to update page title dynamically
 
     # -----------------------------
     # BASIC CONNECTION CHECK

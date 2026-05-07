@@ -1,6 +1,7 @@
 import flet as ft
 import uuid
 import os
+import json
 from datetime import date
 from core.state import state
 from core.theme import AppColors, AppStyles
@@ -63,6 +64,19 @@ class PackingSlipTab(ft.Column):
         self.fest_disc   = ft.TextField(label="Festival %", value="0", width=80, on_change=self._calc, **S)
         self.spec_disc   = ft.TextField(label="Special %",  value="0", width=80, on_change=self._calc, **S)
         self.cash_disc   = ft.TextField(label="Cash %",     value="0", width=80, on_change=self._calc, **S)
+
+        # --- Dynamic discount ordering ---
+        self.DEFAULT_DISCOUNT_ORDER = ["trade", "scheme", "festival", "scd", "cd"]
+        self.DISCOUNT_MAP = {
+            "trade":    {"field": self.trade_disc,  "label": "Trade %"},
+            "scheme":   {"field": self.scheme_disc, "label": "Scheme %"},
+            "festival": {"field": self.fest_disc,   "label": "Festival %"},
+            "scd":      {"field": self.spec_disc,   "label": "Special %"},
+            "cd":       {"field": self.cash_disc,   "label": "Cash %"},
+        }
+        self._discount_order = list(self.DEFAULT_DISCOUNT_ORDER)
+        self.discount_row = ft.Row(spacing=10)
+        self._reorder_discount_fields()
         self.taxable_val = ft.Text("Taxable: ₹0.00",  size=14, weight="bold")
         self.gst_lbl     = ft.Text("GST (5%): ₹0.00", size=13, color=AppColors.TEXT_SUB)
         self.net_amt     = ft.Text("Total: ₹0.00",    size=20, weight="bold", color=AppColors.PRIMARY)
@@ -161,7 +175,7 @@ class PackingSlipTab(ft.Column):
                     ], spacing=5),
                     ft.Container(expand=True),
                     ft.Column([
-                        ft.Row([self.trade_disc, self.scheme_disc, self.fest_disc, self.spec_disc, self.cash_disc], spacing=10),
+                        self.discount_row,
                         ft.Row([self.aft_dis_amt, ft.VerticalDivider(), self.round_off], alignment=ft.MainAxisAlignment.END),
                     ], horizontal_alignment=ft.CrossAxisAlignment.END),
                 ]),
@@ -217,7 +231,7 @@ class PackingSlipTab(ft.Column):
             p = pdata[0]
             if p.get("transporter_id"): self.trans_dd.value   = str(p["transporter_id"])
             if p.get("agent_id"):       self.agent_dd.value   = str(p["agent_id"])
-            if p.get("destination"):    self.dest.value       = p["destination"]
+            self.dest.value = p.get("delivery_city") or p.get("billing_city", "")
             self.trade_disc.value  = str(p.get("discount_trade",    0))
             self.scheme_disc.value = str(p.get("discount_scheme",   0))
             self.fest_disc.value   = str(p.get("discount_festival", 0))
@@ -225,12 +239,43 @@ class PackingSlipTab(ft.Column):
             self.cash_disc.value   = str(p.get("discount_cd",       0))
             self._party_gst_rate   = float(p.get("gst_percent", 5) or 5)
             self._party_tax_type   = p.get("tax_type", "GST") or "GST"
+            # Load dynamic discount order
+            self._load_discount_order(p.get("discount_order"))
         self._load_pending_orders(party_id)
 
     def _calc(self, e=None):
         self._update_totals()
         if self.page:
             self.update()
+
+    # ─── Dynamic Discount Order Helpers ──────────────────────
+    def _reorder_discount_fields(self):
+        """Rebuild the discount_row with fields in the current _discount_order."""
+        self.discount_row.controls = []
+        for key in self._discount_order:
+            meta = self.DISCOUNT_MAP.get(key)
+            if meta:
+                self.discount_row.controls.append(meta["field"])
+
+    def _load_discount_order(self, raw_order):
+        """Parse discount_order from party data and reorder the footer fields."""
+        if raw_order:
+            if isinstance(raw_order, str):
+                try:
+                    order = json.loads(raw_order)
+                except Exception:
+                    order = list(self.DEFAULT_DISCOUNT_ORDER)
+            elif isinstance(raw_order, list):
+                order = list(raw_order)
+            else:
+                order = list(self.DEFAULT_DISCOUNT_ORDER)
+            if set(order) == set(self.DEFAULT_DISCOUNT_ORDER) and len(order) == 5:
+                self._discount_order = order
+            else:
+                self._discount_order = list(self.DEFAULT_DISCOUNT_ORDER)
+        else:
+            self._discount_order = list(self.DEFAULT_DISCOUNT_ORDER)
+        self._reorder_discount_fields()
 
     # ─────────────────────────────────────────────────────────
     # Order loading
@@ -399,9 +444,11 @@ class PackingSlipTab(ft.Column):
             gross       += amount
         try:
             val = gross
-            for f in [self.trade_disc, self.scheme_disc, self.fest_disc, self.spec_disc, self.cash_disc]:
-                d = float(f.value or 0)
-                val -= val * (d / 100)
+            for key in self._discount_order:
+                meta = self.DISCOUNT_MAP.get(key)
+                if meta:
+                    d = float(meta["field"].value or 0)
+                    val -= val * (d / 100)
             gst = val * (self._party_gst_rate / 100)
             # Update Footer Labels
             self.total_pcs.value   = f"Total Pcs: {int(total_pcs)}"
@@ -624,6 +671,7 @@ class PackingSlipTab(ft.Column):
                     content=ft.Row([
                         ft.Column([
                             ft.Text(f"{s.get('slip_no')}  |  {s.get('slip_date')}", weight="bold", size=14),
+                            ft.Text(f"Created: {(s.get('created_at') or '').replace('T', ' ')[:16]}", size=10, color=ft.colors.BLUE_GREY_400),
                             ft.Text(p_name, size=12, color=AppColors.TEXT_SUB),
                         ], expand=True),
                         ft.Text(f"Pcs: {s.get('total_pcs', 0)}", size=12),

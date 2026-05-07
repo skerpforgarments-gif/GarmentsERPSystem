@@ -359,7 +359,7 @@ class SalesInvoiceTab(ft.Column):
             party_data = select("parties", {"id": self.party_dd.value})
             party = party_data[0] if party_data else {}
             header["party_name"] = party.get("name", "Customer")
-            header["party_address"] = f"{party.get('address_line1','')}, {party.get('city','')}"
+            header["party_address"] = f"{party.get('billing_address_line1','')}, {party.get('city','')}"
             header["party_gstin"] = party.get("gstin", "-")
 
             # Link TI items and gather for PDF
@@ -426,6 +426,7 @@ class SalesInvoiceTab(ft.Column):
                     content=ft.Row([
                         ft.Column([
                             ft.Text(f"{inv.get('invoice_no')}  |  {inv.get('invoice_date')}", weight="bold", size=14),
+                            ft.Text(f"Created: {(inv.get('created_at') or '').replace('T', ' ')[:16]}", size=10, color=ft.colors.BLUE_GREY_400),
                             ft.Text(p_name, size=12, color=AppColors.TEXT_SUB),
                         ], expand=True),
                         ft.Text(f"Pcs: {inv.get('total_pcs', 0)}", size=12),

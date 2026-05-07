@@ -2,6 +2,7 @@ import flet as ft
 
 from core.router import Router
 from core.theme import AppColors, AppStyles
+from core.state import state
 
 
 class MainLayout(ft.Row):
@@ -50,17 +51,23 @@ class MainLayout(ft.Row):
             self.sidebar,
             self.content_area
         ]
+        
+        # Subscribe to state changes to update company name dynamically
+        state.subscribe(self.on_state_change)
 
     # =========================================================
     # SIDEBAR
     # =========================================================
     def build_sidebar(self):
         # Build Navigation items
+        # Header
+        self.company_name_text = ft.Text("Garments ERP", size=20, weight="bold", color=ft.colors.WHITE, overflow=ft.TextOverflow.ELLIPSIS)
+        
         self.sidebar_column.controls = [
             ft.Container(
                 content=ft.Row([
-                    ft.Icon(ft.icons.AUTO_AWESOME, color=AppColors.PRIMARY, size=24),
-                    ft.Text("Garments ERP", size=20, weight="bold", color=AppColors.TEXT_HEADER),
+                    ft.Icon(ft.icons.AUTO_AWESOME, color=ft.colors.WHITE, size=24),
+                    self.company_name_text,
                 ], alignment=ft.MainAxisAlignment.START),
                 padding=ft.padding.only(left=5, top=20, bottom=30)
             ),
@@ -79,9 +86,9 @@ class MainLayout(ft.Row):
 
         return ft.Container(
             width=260,
-            bgcolor=AppColors.BG_CARD,
+            bgcolor=AppColors.TEXT_HEADER,
             padding=15,
-            border=ft.border.only(right=ft.border.BorderSide(1, "#F0F0F0")),
+            border=ft.border.only(right=ft.border.BorderSide(1, "#2D2D5F")),
             content=self.sidebar_column
         )
 
@@ -93,13 +100,13 @@ class MainLayout(ft.Row):
         
         return ft.Container(
             content=ft.Row([
-                ft.Icon(icon, size=20, color=AppColors.PRIMARY if is_active else AppColors.TEXT_SUB),
+                ft.Icon(icon, size=20, color=ft.colors.WHITE if is_active else ft.colors.with_opacity(0.7, ft.colors.WHITE)),
                 ft.Text(text, size=14, weight="bold" if is_active else "w500", 
-                        color=AppColors.PRIMARY if is_active else AppColors.TEXT_SUB)
+                        color=ft.colors.WHITE if is_active else ft.colors.with_opacity(0.7, ft.colors.WHITE))
             ], spacing=15),
             padding=ft.padding.symmetric(horizontal=15, vertical=12),
             border_radius=10,
-            bgcolor=AppColors.PRIMARY_LIGHT if is_active else None,
+            bgcolor=ft.colors.with_opacity(0.15, ft.colors.WHITE) if is_active else None,
             on_click=lambda e: self.router.go(route),
             animate=ft.animation.Animation(300, ft.AnimationCurve.EASE_OUT)
         )
@@ -128,11 +135,22 @@ class MainLayout(ft.Row):
         # Refresh sidebar styles
         for route, btn in self.nav_buttons.items():
             is_active = self.active_route == route
-            btn.bgcolor = AppColors.PRIMARY_LIGHT if is_active else None
-            btn.content.controls[0].color = AppColors.PRIMARY if is_active else AppColors.TEXT_SUB
-            btn.content.controls[1].color = AppColors.PRIMARY if is_active else AppColors.TEXT_SUB
+            btn.bgcolor = ft.colors.with_opacity(0.15, ft.colors.WHITE) if is_active else None
+            btn.content.controls[0].color = ft.colors.WHITE if is_active else ft.colors.with_opacity(0.7, ft.colors.WHITE)
+            btn.content.controls[1].color = ft.colors.WHITE if is_active else ft.colors.with_opacity(0.7, ft.colors.WHITE)
             btn.content.controls[1].weight = "bold" if is_active else "w500"
 
         self.sidebar.visible = not isinstance(screen, LoginScreen)
         self.content_area.content = screen
         self.update()
+
+    def on_state_change(self, app_state):
+        if app_state.current_company:
+            self.company_name_text.value = app_state.current_company.get("name", "Garments ERP")
+        else:
+            self.company_name_text.value = "Garments ERP"
+        self.company_name_text.color = ft.colors.WHITE
+        try:
+            self.update()
+        except:
+            pass

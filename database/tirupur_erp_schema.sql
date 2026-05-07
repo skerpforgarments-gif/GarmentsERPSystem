@@ -94,6 +94,7 @@ CREATE TABLE taxes (
     sgst_percent  NUMERIC(5,2) DEFAULT 0,       -- State GST component
     igst_percent  NUMERIC(5,2) DEFAULT 0,       -- Integrated GST (inter-state)
     tcs_percent   NUMERIC(5,2) DEFAULT 0,       -- Tax Collected at Source
+    cess_percent  NUMERIC(5,2) DEFAULT 0,       -- Compensation Cess
     rate_percent  NUMERIC(5,2) DEFAULT 0        -- Total effective tax rate
 );
 
@@ -151,6 +152,7 @@ CREATE TABLE items (
     is_blocked          BOOLEAN DEFAULT FALSE,
     reason              TEXT,
     opening_stock       JSONB DEFAULT '{}',
+    created_at          TIMESTAMP DEFAULT now(),
     UNIQUE(company_id, item_code)
 );
 
@@ -187,13 +189,22 @@ CREATE TABLE parties (
     company_id          UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
     -- Basic Info
     name                TEXT NOT NULL,
-    address_line1       TEXT,
-    address_line2       TEXT,
-    address_line3       TEXT,
-    city                TEXT,
-    district            TEXT,
-    state               TEXT,
-    pincode             TEXT,
+    -- Billing Address
+    billing_address_line1  TEXT,
+    billing_address_line2  TEXT,
+    billing_address_line3  TEXT,
+    billing_city                TEXT,
+    billing_district            TEXT,
+    billing_state               TEXT,
+    billing_pincode             TEXT,
+    -- Delivery Address
+    delivery_address_line1 TEXT,
+    delivery_address_line2 TEXT,
+    delivery_address_line3 TEXT,
+    delivery_city          TEXT,
+    delivery_district      TEXT,
+    delivery_state         TEXT,
+    delivery_pincode       TEXT,
     -- Communication
     code                TEXT,
     phone               TEXT,
@@ -230,6 +241,11 @@ CREATE TABLE parties (
     tax_type            TEXT DEFAULT 'GST',   -- GST / TCS / IGST
     gst_percent         NUMERIC(5,2) DEFAULT 0,
     igst_percent        NUMERIC(5,2) DEFAULT 0,
+    cgst_percent        NUMERIC(5,2) DEFAULT 0,
+    sgst_percent        NUMERIC(5,2) DEFAULT 0,
+    tcs_percent         NUMERIC(5,2) DEFAULT 0,
+    cess_percent        NUMERIC(5,2) DEFAULT 0,
+    rate_percent        NUMERIC(5,2) DEFAULT 0,
     tcs_applicable      BOOLEAN DEFAULT FALSE,
     -- Discount Structure (%)
     discount_trade      NUMERIC(5,2) DEFAULT 0,   -- TD
@@ -237,10 +253,13 @@ CREATE TABLE parties (
     discount_scd        NUMERIC(5,2) DEFAULT 0,   -- SCD
     discount_cd         NUMERIC(5,2) DEFAULT 0,   -- CD
     discount_festival   NUMERIC(5,2) DEFAULT 0,   -- Festival Discount
+    -- Discount Application Order (customizable per party)
+    discount_order      JSONB DEFAULT '["trade","scheme","festival","scd","cd"]',
     -- Remarks & Status
     remarks             TEXT,
     is_approved         BOOLEAN DEFAULT TRUE,
     is_blocked          BOOLEAN DEFAULT FALSE,
+    created_at          TIMESTAMP DEFAULT now(),
     UNIQUE(company_id, code),
     UNIQUE(company_id, name)
 );
@@ -302,7 +321,8 @@ CREATE TABLE orders (
     round_off           NUMERIC(10,2) DEFAULT 0,
     net_amount          NUMERIC(12,2) DEFAULT 0,
     -- Status
-    status              TEXT DEFAULT 'Pending'  -- Pending, Packed, Invoiced
+    status              TEXT DEFAULT 'Pending',  -- Pending, Packed, Invoiced
+    created_at          TIMESTAMP DEFAULT now()
 );
 
 CREATE TABLE order_items (
@@ -378,7 +398,8 @@ CREATE TABLE packing_slips (
     net_amount          NUMERIC(12,2) DEFAULT 0,
     bar_cod_percent     NUMERIC(5,2) DEFAULT 0,
     -- Status
-    status              TEXT DEFAULT 'Unbilled'  -- Unbilled / Billed
+    status              TEXT DEFAULT 'Unbilled',  -- Unbilled / Billed
+    created_at          TIMESTAMP DEFAULT now()
 );
 
 CREATE TABLE packing_slip_items (
@@ -525,7 +546,8 @@ CREATE TABLE final_invoices (
     igst_amount             NUMERIC(12,2) DEFAULT 0,
     tcs_amount              NUMERIC(12,2) DEFAULT 0,
     round_off               NUMERIC(10,2) DEFAULT 0,
-    net_amount              NUMERIC(12,2) DEFAULT 0
+    net_amount              NUMERIC(12,2) DEFAULT 0,
+    created_at              TIMESTAMP DEFAULT now()
 );
 
 CREATE TABLE final_invoice_items (
@@ -582,7 +604,8 @@ CREATE TABLE receipt_vouchers (
     agent_id        UUID REFERENCES agents(id),
     amount          NUMERIC(12,2) DEFAULT 0,
     mode            TEXT,  -- Cash / Bank / Cheque
-    narration       TEXT
+    narration       TEXT,
+    created_at      TIMESTAMP DEFAULT now()
 );
 
 CREATE TABLE payment_vouchers (
@@ -625,29 +648,6 @@ CREATE TABLE settings (
     invoice_prefix      TEXT,
     order_prefix        TEXT,
     UNIQUE(company_id)
-);
-
-CREATE TABLE purchase_orders (
-    id                  UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    company_id          UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
-    po_no               TEXT NOT NULL,
-    po_date             DATE NOT NULL DEFAULT CURRENT_DATE,
-    supplier_id         UUID NOT NULL REFERENCES parties(id),
-    total_qty           INTEGER DEFAULT 0,
-    total_amount        NUMERIC(12,2) DEFAULT 0,
-    status              TEXT DEFAULT 'Pending',
-    created_at          TIMESTAMP DEFAULT now()
-);
-
-CREATE TABLE purchase_order_items (
-    id                  UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    company_id          UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
-    purchase_order_id   UUID NOT NULL REFERENCES purchase_orders(id) ON DELETE CASCADE,
-    item_id             UUID NOT NULL REFERENCES items(id),
-    size_value          TEXT NOT NULL,
-    qty                 INTEGER DEFAULT 0,
-    rate                NUMERIC(10,2) DEFAULT 0,
-    amount              NUMERIC(12,2) DEFAULT 0
 );
 
 ALTER TABLE agents ENABLE ROW LEVEL SECURITY;

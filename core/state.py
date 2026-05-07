@@ -13,6 +13,7 @@ class AppState:
         # =========================
         self.current_company = None
         self.company_id = None
+        self.page = None  # Reference to ft.Page for dynamic title updates
 
         # =========================
         # APP CONTEXT & SETTINGS
@@ -85,6 +86,13 @@ class AppState:
         """
         self.current_company = company
         self.company_id = company.get("id")
+        # Dynamically update the window title with the company name
+        if self.page and company.get("name"):
+            self.page.title = f"{company['name']} | ERP System"
+            try:
+                self.page.update()
+            except Exception:
+                pass
         self._notify()
 
     # =========================================================
@@ -102,6 +110,13 @@ class AppState:
         self.current_company = None
         self.company_id = None
         self.sales_mode = "order"
+        # Reset title on logout
+        if self.page:
+            self.page.title = "Garments ERP | Login"
+            try:
+                self.page.update()
+            except Exception:
+                pass
         self._notify()
 
 

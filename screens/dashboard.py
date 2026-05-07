@@ -17,6 +17,7 @@ class DashboardScreen(ft.Container):
         # UI ELEMENTS
         # =========================
         self.company_text = ft.Text("", size=16, color=ft.colors.BLUE_GREY_400, weight="w500")
+        self.header_text = ft.Text("Business Overview", size=AppStyles.H1_SIZE, weight="bold", color=AppColors.TEXT_HEADER)
         
         # Premium Cards (Updated design)
         self.sales_card = self.build_stat_card(
@@ -44,7 +45,7 @@ class DashboardScreen(ft.Container):
                 # Header
                 ft.Row([
                     ft.Column([
-                        ft.Text("Business Overview", size=AppStyles.H1_SIZE, weight="bold", color=AppColors.TEXT_HEADER),
+                        self.header_text,
                         self.company_text,
                     ], spacing=2),
                 ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
@@ -201,11 +202,14 @@ class DashboardScreen(ft.Container):
     # =========================================================
     def load_data(self):
         if not state.company_id:
+            self.header_text.value = "Business Overview"
             self.company_text.value = "Welcome back! Please select a company."
             if self.page: self.update()
             return
 
-        self.company_text.value = f"Managing: {state.current_company.get('name')}"
+        company_name = state.current_company.get('name', 'Business')
+        self.header_text.value = "Business Overview"
+        self.company_text.value = f"Managing: {company_name}"
 
         # Show loading spinner
         self.activity_loading.visible = True

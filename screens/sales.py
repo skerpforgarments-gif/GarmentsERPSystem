@@ -1,9 +1,10 @@
 import flet as ft
 import uuid
+import json
 from datetime import date
 from core.state import state
 from core.theme import AppColors, AppStyles
-from database.db import select, insert
+from database.db import select, insert, update, delete
 from components.size_matrix import SizeMatrixModal, sort_sizes
 from core.pdf_gen import pdf_engine, print_pdf
 import os
@@ -31,6 +32,7 @@ class OrderEntryTab(ft.Column):
         self.order_items        = []
         self.all_items_metadata = {}
         self.matrix_modal       = None
+        self.current_edit_id    = None
 
         # ── Header controls ───────────────────────────────────
         self.order_no   = ft.TextField(label="Order No", width=150, **AppStyles.get_input_style())
@@ -42,6 +44,7 @@ class OrderEntryTab(ft.Column):
         self.price_type_dd  = ft.Dropdown(
             label="Type", width=120, value="Wholesale",
             options=[ft.dropdown.Option(k) for k in ("Wholesale", "Retail", "MRP")],
+            on_change=self.on_price_type_change,
             **AppStyles.get_input_style()
         )
         self.qty_type = ft.SegmentedButton(
@@ -88,6 +91,19 @@ class OrderEntryTab(ft.Column):
         
         self.cash_disc    = ft.TextField(label="Cash %",   value="0", width=80, on_change=self.on_calc_change, **S)
         self.cd_amt_lbl   = ft.Text("Amt: ₹0.00", size=11, color=AppColors.TEXT_SUB)
+        
+        # --- Dynamic discount ordering ---
+        self.DEFAULT_DISCOUNT_ORDER = ["trade", "scheme", "festival", "scd", "cd"]
+        self.DISCOUNT_MAP = {
+            "trade":    {"field": self.trade_disc,  "amt": self.td_amt_lbl,  "label": "Trade %"},
+            "scheme":   {"field": self.scheme_disc, "amt": self.spd_amt_lbl, "label": "Scheme %"},
+            "festival": {"field": self.fest_disc,   "amt": self.fd_amt_lbl,  "label": "Fest %"},
+            "scd":      {"field": self.spec_disc,   "amt": self.scd_amt_lbl, "label": "Spec %"},
+            "cd":       {"field": self.cash_disc,   "amt": self.cd_amt_lbl,  "label": "Cash %"},
+        }
+        self._discount_order = list(self.DEFAULT_DISCOUNT_ORDER)
+        self.discount_row = ft.Row(spacing=15)  # Dynamically reordered
+        self._reorder_discount_fields()
         
         self.taxable_value = ft.Text("Taxable: ₹0.00",   size=14, weight="bold")
         self.gst_amount    = ft.Text("GST (5%): ₹0.00",  size=13, color=AppColors.TEXT_SUB)
@@ -160,15 +176,21 @@ class OrderEntryTab(ft.Column):
     def _build_col_header(self):
         return ft.Container(
             bgcolor="#F1F5F9",
-            padding=ft.padding.symmetric(horizontal=24, vertical=8),
+            padding=ft.padding.symmetric(horizontal=24, vertical=10),
+            border=ft.border.only(bottom=ft.border.BorderSide(1, "#E2E8F0")),
             content=ft.Row([
-                ft.Text("IC CODE",    width=80,  size=11, weight="bold"),
-                ft.Text("DESCRIPTION", width=200, size=11, weight="bold"),
-                ft.Text("TOTAL PCS",  width=90,  size=11, weight="bold", text_align=ft.TextAlign.RIGHT),
-                ft.Text("TOTAL BOXES", width=95,  size=11, weight="bold", text_align=ft.TextAlign.RIGHT),
-                ft.Text("TOTAL UNITS", width=95,  size=11, weight="bold", text_align=ft.TextAlign.RIGHT),
-                ft.Text("ACTIONS",    expand=True, size=11, weight="bold", text_align=ft.TextAlign.RIGHT),
-            ]),
+                ft.Text("IC CODE / ITEM NAME", width=220, size=11, weight="bold", color=AppColors.TEXT_SUB),
+                ft.Text("SIZE",              width=80,  size=11, weight="bold", color=AppColors.TEXT_SUB),
+                ft.Text("QTY",               width=70,  size=11, weight="bold", color=AppColors.TEXT_SUB, text_align=ft.TextAlign.RIGHT),
+                ft.Text("TOT PCS",           width=70,  size=11, weight="bold", color=AppColors.TEXT_SUB, text_align=ft.TextAlign.RIGHT),
+                ft.Text("BOXES",             width=70,  size=11, weight="bold", color=AppColors.TEXT_SUB, text_align=ft.TextAlign.RIGHT),
+                ft.Text("RATE",              width=90,  size=11, weight="bold", color=AppColors.TEXT_SUB, text_align=ft.TextAlign.RIGHT),
+                ft.Text("DISC %",            width=70,  size=11, weight="bold", color=AppColors.TEXT_SUB, text_align=ft.TextAlign.RIGHT),
+                ft.Text("TAXABLE",           width=100, size=11, weight="bold", color=AppColors.TEXT_SUB, text_align=ft.TextAlign.RIGHT),
+                ft.Text("GST %",             width=70,  size=11, weight="bold", color=AppColors.TEXT_SUB, text_align=ft.TextAlign.RIGHT),
+                ft.Text("GROSS AMT",         width=120, size=11, weight="bold", color=AppColors.TEXT_SUB, text_align=ft.TextAlign.RIGHT),
+                ft.Text("ACT",               width=50,  size=11, weight="bold", color=AppColors.TEXT_SUB, text_align=ft.TextAlign.CENTER),
+            ], spacing=0)
         )
 
     def _build_footer(self):
@@ -184,13 +206,7 @@ class OrderEntryTab(ft.Column):
                         ft.Row([self.total_pcs, ft.Text(" | "), self.total_boxes, ft.Text(" | "), self.total_units]),
                     ], spacing=5),
                     ft.Container(expand=True),
-                    ft.Row([
-                        ft.Column([self.trade_disc, self.td_amt_lbl], horizontal_alignment=ft.CrossAxisAlignment.CENTER, spacing=2),
-                        ft.Column([self.scheme_disc, self.spd_amt_lbl], horizontal_alignment=ft.CrossAxisAlignment.CENTER, spacing=2),
-                        ft.Column([self.fest_disc, self.fd_amt_lbl], horizontal_alignment=ft.CrossAxisAlignment.CENTER, spacing=2),
-                        ft.Column([self.spec_disc, self.scd_amt_lbl], horizontal_alignment=ft.CrossAxisAlignment.CENTER, spacing=2),
-                        ft.Column([self.cash_disc, self.cd_amt_lbl], horizontal_alignment=ft.CrossAxisAlignment.CENTER, spacing=2),
-                    ], spacing=15),
+                    self.discount_row,
                 ]),
                 ft.Divider(height=1, color="#E2E8F0"),
                 # Row 2: Final Totals and Actions
@@ -261,12 +277,15 @@ class OrderEntryTab(ft.Column):
             if p.get("price_list_id"):  self.price_list_dd.value  = str(p["price_list_id"])
             if p.get("price_type"):     self.price_type_dd.value  = p["price_type"]
             if p.get("agent_id"):       self.agent_dd.value       = str(p["agent_id"])
+            self.destination.value = p.get("delivery_city") or p.get("billing_city", "")
             # Auto-fill all 5 discount tiers from Party Master
             self.trade_disc.value  = str(p.get("discount_trade",    0))
             self.scheme_disc.value = str(p.get("discount_scheme",   0))
             self.fest_disc.value   = str(p.get("discount_festival", 0))
-            self.spec_disc.value   = str(p.get("discount_scd",      0))  # Special Cash Discount
-            self.cash_disc.value   = str(p.get("discount_cd",       0))  # Cash Discount
+            self.spec_disc.value   = str(p.get("discount_scd",      0))
+            self.cash_disc.value   = str(p.get("discount_cd",       0))
+            # Load dynamic discount order
+            self._load_discount_order(p.get("discount_order"))
             # Store party-level GST for totals calculation
             self._party_gst_rate = float(p.get("gst_percent", 5) or 5)
             self._party_tax_type = p.get("tax_type", "GST") or "GST"
@@ -277,6 +296,75 @@ class OrderEntryTab(ft.Column):
         self.update_totals()
         self.update()
 
+    def on_price_type_change(self, e):
+        """Automatically updates all rates in the grid when the Price Type changes."""
+        if not self.price_list_dd.value or not self.order_items:
+            return
+            
+        try:
+            # 1. Fetch latest prices from master
+            prices = select("price_list_items", {"price_list_id": self.price_list_dd.value})
+            
+            # 2. Build a lookup map: { item_id: { size: rate } }
+            rate_key = f"{self.price_type_dd.value.lower()}_rate"
+            rate_map = {}
+            for p in prices:
+                iid = str(p["item_id"])
+                if iid not in rate_map: rate_map[iid] = {}
+                rate_map[iid][p["size_value"]] = float(p.get(rate_key, 0))
+                
+            # 3. Update every item currently in the grid
+            for item in self.order_items:
+                iid = str(item["item_id"])
+                # Get the first size from the comma-separated label to determine the new rate
+                sizes = [s.strip() for s in item["sizes_label"].split(",")]
+                if sizes and iid in rate_map:
+                    # Try first size, fallback to 0
+                    new_rate = rate_map[iid].get(sizes[0], 0)
+                    item["rate"] = new_rate
+
+            # 4. Refresh UI
+            self.rebuild_grid()
+            self.page.snack_bar = ft.SnackBar(ft.Text(f"Switched to {self.price_type_dd.value} pricing"), bgcolor=AppColors.INFO)
+            self.page.snack_bar.open = True
+            self.page.update()
+            
+        except Exception as ex:
+            print(f"Price Switch Error: {ex}")
+
+    # ─── Dynamic Discount Order Helpers ──────────────────────
+    def _reorder_discount_fields(self):
+        """Rebuild the discount_row with columns in the current _discount_order."""
+        self.discount_row.controls = []
+        for key in self._discount_order:
+            meta = self.DISCOUNT_MAP.get(key)
+            if meta:
+                self.discount_row.controls.append(
+                    ft.Column([meta["field"], meta["amt"]],
+                              horizontal_alignment=ft.CrossAxisAlignment.CENTER, spacing=2)
+                )
+
+    def _load_discount_order(self, raw_order):
+        """Parse discount_order from party data and reorder the footer fields."""
+        if raw_order:
+            if isinstance(raw_order, str):
+                try:
+                    order = json.loads(raw_order)
+                except Exception:
+                    order = list(self.DEFAULT_DISCOUNT_ORDER)
+            elif isinstance(raw_order, list):
+                order = list(raw_order)
+            else:
+                order = list(self.DEFAULT_DISCOUNT_ORDER)
+            # Validate all 5 keys are present
+            if set(order) == set(self.DEFAULT_DISCOUNT_ORDER) and len(order) == 5:
+                self._discount_order = order
+            else:
+                self._discount_order = list(self.DEFAULT_DISCOUNT_ORDER)
+        else:
+            self._discount_order = list(self.DEFAULT_DISCOUNT_ORDER)
+        self._reorder_discount_fields()
+
     def on_qty_type_change(self, e):
         self.rebuild_grid()
 
@@ -286,6 +374,8 @@ class OrderEntryTab(ft.Column):
             self.page.snack_bar.open = True
             self.page.update()
             return
+        
+        self.matrix_modal.reset()
         self.matrix_modal.price_list_id = self.price_list_dd.value
         self.matrix_modal.price_type    = self.price_type_dd.value or "Wholesale"
         self.matrix_modal.open = True
@@ -320,33 +410,93 @@ class OrderEntryTab(ft.Column):
         inner = meta.get("pcs_per_inner_box",  1) or 1
         outer = meta.get("boxes_per_outer_box", 1) or 1
         is_box = self.qty_type.selected == {"box"}
-        pcs   = item["qty"] * inner * outer if is_box else item["qty"]
-        boxes = item["qty"] if is_box else pcs / (inner * outer)
-        amount  = pcs * item["rate"]
-        disc    = amount * (item.get("disc_p", 0) / 100)
-        taxable = amount - disc
         tax_rate = self._party_gst_rate
-        tax_amt  = taxable * (tax_rate / 100)
-        gross    = taxable + tax_amt
+
+        # Dynamic labels for real-time updates
+        pcs_lbl     = ft.Text("", width=70,  size=13, text_align=ft.TextAlign.RIGHT)
+        boxes_lbl   = ft.Text("", width=70,  size=13, text_align=ft.TextAlign.RIGHT)
+        taxable_lbl = ft.Text("", width=100, size=13, text_align=ft.TextAlign.RIGHT)
+        gross_lbl   = ft.Text("", width=120, size=13, weight="bold", text_align=ft.TextAlign.RIGHT, color=AppColors.PRIMARY)
+
+        def update_labels():
+            pcs   = item["qty"] * inner * outer if is_box else item["qty"]
+            boxes = item["qty"] if is_box else pcs / (inner * outer)
+            amount  = pcs * item["rate"]
+            disc    = amount * (item.get("disc_p", 0) / 100)
+            taxable = amount - disc
+            tax_amt = taxable * (tax_rate / 100)
+            gross   = taxable + tax_amt
+
+            pcs_lbl.value     = str(int(pcs))
+            boxes_lbl.value   = f"{boxes:.1f}"
+            taxable_lbl.value = f"₹{taxable:,.2f}"
+            gross_lbl.value   = f"₹{gross:,.2f}"
+            
+            if pcs_lbl.page:
+                pcs_lbl.update(); boxes_lbl.update(); taxable_lbl.update(); gross_lbl.update()
+
+        def update_item_field(f, v):
+            try:
+                if f == "qty": item["qty"] = int(v or 0)
+                elif f == "rate": item["rate"] = float(v or 0)
+                elif f == "disc_p": item["disc_p"] = float(v or 0)
+                update_labels()
+                self.update_totals()
+            except ValueError: pass
+
+        update_labels() # Initial population
 
         return ft.Container(
             bgcolor=ft.colors.WHITE,
             padding=ft.padding.symmetric(horizontal=24, vertical=10),
             border=ft.border.only(bottom=ft.border.BorderSide(1, "#F1F5F9")),
             content=ft.Row([
-                ft.Text(item["item_name"],        width=200, size=13, weight="w500"),
-                ft.Text(item["sizes_label"],      width=110, size=11, color=AppColors.PRIMARY, italic=True),
-                ft.Text(str(item["qty"]),         width=50,  size=13, weight="bold", text_align=ft.TextAlign.RIGHT),
-                ft.Text(str(int(pcs)),            width=50,  size=13, text_align=ft.TextAlign.RIGHT),
-                ft.Text(f"{boxes:.1f}",           width=55,  size=13, text_align=ft.TextAlign.RIGHT),
-                ft.Text(f"₹{item['rate']}",       width=70,  size=13, text_align=ft.TextAlign.RIGHT),
-                ft.Text(f"{item['disc_p']:.1f}%", width=55,  size=13, text_align=ft.TextAlign.RIGHT),
-                ft.Text(f"₹{taxable:,.2f}",       width=80,  size=13, text_align=ft.TextAlign.RIGHT),
-                ft.Text(f"{tax_rate:.0f}%",       width=55,  size=13, text_align=ft.TextAlign.RIGHT, color=AppColors.TEXT_SUB),
-                ft.Text(f"₹{gross:,.2f}", expand=True, size=13, weight="bold",
-                        text_align=ft.TextAlign.RIGHT, color=AppColors.PRIMARY),
-            ]),
+                ft.Text(item["item_name"],        width=220, size=13, weight="w500"),
+                ft.Text(item["sizes_label"],      width=80,  size=11, color=AppColors.PRIMARY, italic=True),
+                
+                ft.Container(
+                    width=70, content=ft.TextField(
+                        value=str(item["qty"]), text_align=ft.TextAlign.RIGHT,
+                        on_change=lambda e: update_item_field("qty", e.control.value), 
+                        **{**AppStyles.get_input_style(), "height": 35}
+                    )
+                ),
+                
+                pcs_lbl,
+                boxes_lbl,
+                
+                ft.Container(
+                    width=90, content=ft.TextField(
+                        value=str(item["rate"]), text_align=ft.TextAlign.RIGHT,
+                        on_change=lambda e: update_item_field("rate", e.control.value), 
+                        **{**AppStyles.get_input_style(), "height": 35}
+                    )
+                ),
+                
+                ft.Container(
+                    width=70, content=ft.TextField(
+                        value=str(item["disc_p"]), text_align=ft.TextAlign.RIGHT,
+                        on_change=lambda e: update_item_field("disc_p", e.control.value), 
+                        **{**AppStyles.get_input_style(), "height": 35}
+                    )
+                ),
+                
+                taxable_lbl,
+                ft.Text(f"{tax_rate:.0f}%",       width=70,  size=13, text_align=ft.TextAlign.RIGHT, color=AppColors.TEXT_SUB),
+                gross_lbl,
+                
+                ft.Container(
+                    width=50, content=ft.IconButton(
+                        ft.icons.DELETE_OUTLINE, icon_color="red400", icon_size=18,
+                        on_click=lambda _: self.remove_item(item)
+                    ), alignment=ft.alignment.center
+                )
+            ], spacing=0, vertical_alignment=ft.CrossAxisAlignment.CENTER),
         )
+
+    def remove_item(self, item):
+        self.order_items.remove(item)
+        self.rebuild_grid()
 
     def rebuild_grid(self):
         self.items_col.controls = [self._make_row(item) for item in self.order_items]
@@ -374,19 +524,27 @@ class OrderEntryTab(ft.Column):
 
         try:
             val = gross_sum
-            for f in [self.trade_disc, self.scheme_disc, self.fest_disc, self.spec_disc, self.cash_disc]:
-                d = float(f.value or 0)
-                val -= val * (d / 100)
+            for key in self._discount_order:
+                meta = self.DISCOUNT_MAP.get(key)
+                if meta:
+                    d = float(meta["field"].value or 0)
+                    val -= val * (d / 100)
             gst_rate = self._party_gst_rate
             gst      = val * (gst_rate / 100)
             tax_label = self._party_tax_type
+            
+            grand_total = val + gst
+            rounded_total = round(grand_total)
+            diff = rounded_total - grand_total
+
             self.no_of_items_lbl.value = f"No. Of Items: {len(self.order_items)}"
             self.total_pcs.value     = f"Total Pcs: {int(total_pcs)}"
             self.total_boxes.value   = f"Total Boxes: {total_boxes:.1f}"
-            self.total_units.value   = f"Total Units: {int(total_pcs)}"  # In Order Entry, Units = Pcs usually
+            self.total_units.value   = f"Total Units: {int(total_pcs)}"
             self.taxable_value.value = f"Taxable: ₹{val:,.2f}"
             self.gst_amount.value    = f"{tax_label} ({gst_rate:.0f}%): ₹{gst:,.2f}"
-            self.gross_amount.value  = f"Total: ₹{val + gst:,.2f}"
+            self.round_off.value     = f"{diff:+.2f}"
+            self.gross_amount.value  = f"Total: ₹{rounded_total:,.2f}"
         except Exception:
             pass
 
@@ -442,10 +600,18 @@ class OrderEntryTab(ft.Column):
                 "net_amount":     safe_split_val(self.gross_amount),
                 "status":         "Pending"
             }
-            res = insert("orders", header)
-            if not res:
-                raise Exception("Failed to save order header")
-            order_id = res[0]["id"]
+            if self.current_edit_id:
+                # Update existing
+                order_id = self.current_edit_id
+                update("orders", header, {"id": order_id})
+                # Clear old items
+                delete("order_items", {"order_id": order_id})
+            else:
+                # Insert new
+                res = insert("orders", header)
+                if not res:
+                    raise Exception("Failed to save order header")
+                order_id = res[0]["id"]
 
             for item in self.order_items:
                 meta  = self.all_items_metadata.get(str(item["item_id"]), {})
@@ -514,15 +680,19 @@ class OrderEntryTab(ft.Column):
         self.party_order_dt.value = date.today().isoformat()
         self.remarks.value = ""
         self.no_of_cases.value = "1"
+        self.qty_type.selected = {"pcs"}
         self.trade_disc.value = "0"
         self.scheme_disc.value = "0"
         self.fest_disc.value = "0"
         self.spec_disc.value = "0"
         self.cash_disc.value = "0"
         self.round_off.value = "0.00"
+        self._discount_order = list(self.DEFAULT_DISCOUNT_ORDER)
+        self._reorder_discount_fields()
         self.order_items = []
         self.items_col.controls = []
-        self.on_calc_change(None)
+        self.current_edit_id = None
+        self.update_totals()
         if self.page: self.update()
 
     # ─────────────────────────────────────────────────────────
@@ -530,7 +700,8 @@ class OrderEntryTab(ft.Column):
     # ─────────────────────────────────────────────────────────
     def show_history_modal(self, e):
         orders = select("orders", {"company_id": state.company_id})
-        orders.sort(key=lambda x: x.get("order_date", ""), reverse=True)
+        # Sort by created_at DESC (latest first)
+        orders.sort(key=lambda x: x.get("created_at", ""), reverse=True)
         
         parties = select("parties", {"company_id": state.company_id})
         party_map = {str(p["id"]): p["name"] for p in parties}
@@ -548,13 +719,26 @@ class OrderEntryTab(ft.Column):
                     border=ft.border.all(1, "#E2E8F0"),
                     content=ft.Row([
                         ft.Column([
-                            ft.Text(f"{ord.get('order_no')}  |  {ord.get('order_date')}", weight="bold", size=14),
-                            ft.Text(p_name, size=12, color=AppColors.TEXT_SUB),
-                        ], expand=True),
-                        ft.Text(f"Pcs: {ord.get('total_pcs', 0)}", size=12),
-                        ft.Text(f"₹ {float(ord.get('total_amount', 0)):,.2f}", size=14, weight="bold", color=AppColors.PRIMARY),
-                        ft.IconButton(ft.icons.PRINT, tooltip="Print Order", icon_color=ft.colors.BLUE_700, 
-                                      on_click=lambda e, o=ord: self.print_history_order(o))
+                            ft.Text(f"{ord.get('order_no')}", weight="bold", size=14),
+                            ft.Row([
+                                ft.Icon(ft.icons.CALENDAR_TODAY, size=12, color=ft.colors.BLUE_GREY_400),
+                                ft.Text(f"{ord.get('order_date')}", size=11, color=ft.colors.BLUE_GREY_600),
+                                ft.VerticalDivider(width=10),
+                                ft.Icon(ft.icons.ACCESS_TIME, size=12, color=ft.colors.BLUE_GREY_400),
+                                ft.Text(self._format_timestamp(ord.get('created_at')), size=11, color=ft.colors.BLUE_GREY_600),
+                            ], spacing=5),
+                            ft.Text(p_name, size=13, weight="w500", color=AppColors.PRIMARY),
+                        ], expand=True, spacing=4),
+                        ft.Column([
+                            ft.Text(f"Pcs: {int(ord.get('total_pcs', 0))}", size=12, weight="bold"),
+                            ft.Text(f"₹ {float(ord.get('total_amount', 0)):,.2f}", size=15, weight="bold", color=ft.colors.GREEN_700),
+                        ], horizontal_alignment=ft.CrossAxisAlignment.END, spacing=2),
+                        ft.Row([
+                            ft.IconButton(ft.icons.EDIT_OUTLINED, tooltip="Edit Order", icon_color=AppColors.PRIMARY, 
+                                          on_click=lambda e, o=ord: self.load_order_for_edit(o, dlg)),
+                            ft.IconButton(ft.icons.PRINT, tooltip="Print Order", icon_color=ft.colors.BLUE_700, 
+                                          on_click=lambda e, o=ord: self.print_history_order(o))
+                        ])
                     ])
                 )
             )
@@ -567,6 +751,81 @@ class OrderEntryTab(ft.Column):
         self.page.overlay.append(dlg)
         dlg.open = True
         self.page.update()
+
+    def load_order_for_edit(self, order, dlg):
+        """Loads a past order into the main form for editing."""
+        try:
+            self._close_dialog(dlg)
+            self.clear_form()
+            
+            self.current_edit_id = order["id"]
+            self.order_no.value   = order.get("order_no", "")
+            self.order_date.value = order.get("order_date", "")
+            self.party_dd.value   = str(order.get("party_id"))
+            self.agent_dd.value   = str(order.get("agent_id")) if order.get("agent_id") else None
+            self.transporter_dd.value = str(order.get("transporter_id")) if order.get("transporter_id") else None
+            self.price_list_dd.value  = str(order.get("price_list_id")) if order.get("price_list_id") else None
+            self.price_type_dd.value  = order.get("price_type", "Wholesale")
+            self.destination.value    = order.get("destination", "")
+            self.order_by.value       = order.get("order_by", "")
+            self.order_thro.value     = order.get("order_thro", "DIRECT")
+            self.party_order_no.value = order.get("party_order_no", "")
+            self.party_order_dt.value = order.get("party_order_date", "")
+            self.remarks.value        = order.get("remarks", "")
+            self.no_of_cases.value    = str(order.get("no_of_cases", 1))
+            
+            # Discounts
+            self.trade_disc.value  = str(order.get("td_percent", 0))
+            self.scheme_disc.value = str(order.get("spd_percent", 0))
+            self.fest_disc.value   = str(order.get("festival_percent", 0))
+            self.spec_disc.value   = str(order.get("scd_percent", 0))
+            self.cash_disc.value   = str(order.get("cd_percent", 0))
+            
+            # Load items
+            db_items = select("order_items", {"order_id": order["id"]})
+            
+            # Group items by (item_id, rate) to match the UI row structure
+            # (In Tirupur ERP, multiple sizes at same rate are grouped in one row)
+            item_groups = {}
+            for it in db_items:
+                # We need to reconstruct the item_name and sizes_label
+                meta = self.all_items_metadata.get(str(it["item_id"]), {})
+                key = (str(it["item_id"]), float(it["rate"]))
+                if key not in item_groups:
+                    item_groups[key] = {
+                        "item_id": it["item_id"],
+                        "item_name": meta.get("item_name", "Unknown"),
+                        "rate": float(it["rate"]),
+                        "qty": 0,
+                        "disc_p": 0, # Assume uniform discount for simplicity, or fetch from first item
+                        "sizes": []
+                    }
+                item_groups[key]["qty"] += int(it["qty_pieces"])
+                item_groups[key]["sizes"].append(it["size_value"])
+            
+            for g in item_groups.values():
+                g["sizes_label"] = ", ".join(g["sizes"])
+                self.order_items.append(g)
+
+            self.rebuild_grid()
+            self.page.snack_bar = ft.SnackBar(ft.Text(f"Loaded Order: {self.order_no.value}"), bgcolor=AppColors.PRIMARY)
+            self.page.snack_bar.open = True
+            self.page.update()
+        except Exception as ex:
+            print(f"Edit Load Error: {ex}")
+            self.page.snack_bar = ft.SnackBar(ft.Text(f"Failed to load order: {ex}"), bgcolor="red")
+            self.page.snack_bar.open = True
+            self.page.update()
+
+    def _format_timestamp(self, ts):
+        if not ts: return "-"
+        try:
+            # Assumes ISO format from Postgres
+            from datetime import datetime
+            dt = datetime.fromisoformat(ts.replace('Z', '+00:00'))
+            return dt.strftime("%b %d, %Y %I:%M %p")
+        except:
+            return str(ts)[:16]
 
     def _close_dialog(self, dlg):
         dlg.open = False

@@ -1,6 +1,7 @@
 import flet as ft
 import uuid
 import os
+import json
 from datetime import date
 from core.state import state
 from core.theme import AppColors, AppStyles
@@ -58,6 +59,19 @@ class TransportInvoiceTab(ft.Column):
         self.fest_p = ft.TextField(label="Festival %", value="0", width=80, on_change=self._calc, **S)
         self.scd_p  = ft.TextField(label="Special %",  value="0", width=80, on_change=self._calc, **S)
         self.cd_p   = ft.TextField(label="Cash %",     value="0", width=80, on_change=self._calc, **S)
+
+        # --- Dynamic discount ordering ---
+        self.DEFAULT_DISCOUNT_ORDER = ["trade", "scheme", "festival", "scd", "cd"]
+        self.DISCOUNT_MAP = {
+            "trade":    {"field": self.td_p,   "label": "Trade %"},
+            "scheme":   {"field": self.spd_p,  "label": "Scheme %"},
+            "festival": {"field": self.fest_p,  "label": "Festival %"},
+            "scd":      {"field": self.scd_p,   "label": "Special %"},
+            "cd":       {"field": self.cd_p,    "label": "Cash %"},
+        }
+        self._discount_order = list(self.DEFAULT_DISCOUNT_ORDER)
+        self.discount_row = ft.Row(spacing=8)
+        self._reorder_discount_fields()
 
         self.taxable_val = ft.Text("Taxable: ₹0.00", size=14, weight="bold")
         self.gst_lbl     = ft.Text("IGST (5%): ₹0.00", size=13, color=AppColors.TEXT_SUB)
@@ -131,8 +145,8 @@ class TransportInvoiceTab(ft.Column):
                     ft.Column([self.total_pcs, self.total_boxes], spacing=4),
                     ft.Container(expand=True),
                     ft.Column([
-                        ft.Row([self.td_p, self.spd_p, self.fest_p, self.scd_p, self.cd_p], spacing=8),
-                        ft.Text("Calculated Sequentially: (Total - Trade%) - Scheme% - Festival% ...", size=10, italic=True, color="#999")
+                        self.discount_row,
+                        ft.Text("Calculated Sequentially in the order shown above", size=10, italic=True, color="#999")
                     ], horizontal_alignment=ft.CrossAxisAlignment.END)
                 ]),
                 ft.Divider(height=1, color="#E2E8F0"),
@@ -176,10 +190,42 @@ class TransportInvoiceTab(ft.Column):
             self.fest_p.value = str(p.get("discount_festival", 0))
             self.scd_p.value  = str(p.get("discount_scd", 0))
             self.cd_p.value   = str(p.get("discount_cd", 0))
+            self.dest.value   = p.get("delivery_city") or p.get("billing_city", "")
             self._party_gst_rate = float(p.get("gst_percent", 5) or 5)
             self._party_tax_type = p.get("tax_type", "IGST") or "IGST"
+            # Load dynamic discount order
+            self._load_discount_order(p.get("discount_order"))
         
         self.load_slips(party_id)
+
+    # ─── Dynamic Discount Order Helpers ──────────────────────
+    def _reorder_discount_fields(self):
+        """Rebuild the discount_row with fields in the current _discount_order."""
+        self.discount_row.controls = []
+        for key in self._discount_order:
+            meta = self.DISCOUNT_MAP.get(key)
+            if meta:
+                self.discount_row.controls.append(meta["field"])
+
+    def _load_discount_order(self, raw_order):
+        """Parse discount_order from party data and reorder the footer fields."""
+        if raw_order:
+            if isinstance(raw_order, str):
+                try:
+                    order = json.loads(raw_order)
+                except Exception:
+                    order = list(self.DEFAULT_DISCOUNT_ORDER)
+            elif isinstance(raw_order, list):
+                order = list(raw_order)
+            else:
+                order = list(self.DEFAULT_DISCOUNT_ORDER)
+            if set(order) == set(self.DEFAULT_DISCOUNT_ORDER) and len(order) == 5:
+                self._discount_order = order
+            else:
+                self._discount_order = list(self.DEFAULT_DISCOUNT_ORDER)
+        else:
+            self._discount_order = list(self.DEFAULT_DISCOUNT_ORDER)
+        self._reorder_discount_fields()
 
     def load_slips(self, party_id):
         self._available_slips = select("packing_slips", {
@@ -239,9 +285,11 @@ class TransportInvoiceTab(ft.Column):
 
         try:
             val = gross
-            for f in [self.td_p, self.spd_p, self.fest_p, self.scd_p, self.cd_p]:
-                d = float(f.value or 0)
-                val -= val * (d / 100)
+            for key in self._discount_order:
+                meta = self.DISCOUNT_MAP.get(key)
+                if meta:
+                    d = float(meta["field"].value or 0)
+                    val -= val * (d / 100)
             
             # Add Freight
             freight = float(self.charges.value or 0)
@@ -271,8 +319,10 @@ class TransportInvoiceTab(ft.Column):
             gross = sum(float(s.get("total_amount", 0)) for s in selected_data)
             
             val = gross
-            for f in [self.td_p, self.spd_p, self.fest_p, self.scd_p, self.cd_p]:
-                val -= val * (float(f.value or 0) / 100)
+            for key in self._discount_order:
+                meta = self.DISCOUNT_MAP.get(key)
+                if meta:
+                    val -= val * (float(meta["field"].value or 0) / 100)
             
             freight = float(self.charges.value or 0)
             taxable = val + freight
@@ -321,7 +371,7 @@ class TransportInvoiceTab(ft.Column):
             party_data = select("parties", {"id": self.party_dd.value})
             party = party_data[0] if party_data else {}
             header["party_name"] = party.get("name", "Customer")
-            header["party_address"] = f"{party.get('address_line1','')}, {party.get('city','')}"
+            header["party_address"] = f"{party.get('billing_address_line1','')}, {party.get('city','')}"
             header["party_gstin"] = party.get("gstin", "-")
             header["taxable_amount"] = taxable
 
@@ -404,6 +454,7 @@ class TransportInvoiceTab(ft.Column):
                     content=ft.Row([
                         ft.Column([
                             ft.Text(f"{inv.get('invoice_no')}  |  {inv.get('invoice_date')}", weight="bold", size=14),
+                            ft.Text(f"Created: {(inv.get('created_at') or '').replace('T', ' ')[:16]}", size=10, color=ft.colors.BLUE_GREY_400),
                             ft.Text(p_name, size=12, color=AppColors.TEXT_SUB),
                         ], expand=True),
                         ft.Text(f"Pcs: {inv.get('total_pcs', 0)}", size=12),
