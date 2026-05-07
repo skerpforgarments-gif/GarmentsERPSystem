@@ -284,16 +284,9 @@ class TransportInvoiceTab(ft.Column):
             gross       += float(s.get("total_amount", 0))
 
         try:
-            val = gross
-            for key in self._discount_order:
-                meta = self.DISCOUNT_MAP.get(key)
-                if meta:
-                    d = float(meta["field"].value or 0)
-                    val -= val * (d / 100)
-            
             # Add Freight
             freight = float(self.charges.value or 0)
-            taxable = val + freight
+            taxable = gross + freight
             
             gst = taxable * (self._party_gst_rate / 100)
             
@@ -318,14 +311,8 @@ class TransportInvoiceTab(ft.Column):
             total_boxes = sum(float(s.get("total_boxes", 0)) for s in selected_data)
             gross = sum(float(s.get("total_amount", 0)) for s in selected_data)
             
-            val = gross
-            for key in self._discount_order:
-                meta = self.DISCOUNT_MAP.get(key)
-                if meta:
-                    val -= val * (float(meta["field"].value or 0) / 100)
-            
             freight = float(self.charges.value or 0)
-            taxable = val + freight
+            taxable = gross + freight
             gst = taxable * (self._party_gst_rate / 100)
 
             header = {
@@ -348,11 +335,11 @@ class TransportInvoiceTab(ft.Column):
                 "total_pcs":      int(total_pcs),
                 "total_boxes":    round(total_boxes, 2),
                 "total_amount":   round(gross, 2),
-                "td_percent":     float(self.td_p.value or 0),
-                "spd_percent":    float(self.spd_p.value or 0),
-                "festival_percent": float(self.fest_p.value or 0),
-                "scd_percent":    float(self.scd_p.value or 0),
-                "cd_percent":     float(self.cd_p.value or 0),
+                "td_percent":     0,
+                "spd_percent":    0,
+                "festival_percent": 0,
+                "scd_percent":    0,
+                "cd_percent":     0,
                 "tax_type":       self._party_tax_type,
                 "tax_per":        self._party_gst_rate,
                 "gst_amount":     round(gst, 2),

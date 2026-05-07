@@ -620,6 +620,14 @@ class OrderEntryTab(ft.Column):
                     raise Exception("Failed to save order header")
                 order_id = res[0]["id"]
 
+            # Calculate Footer Discount Multiplier
+            footer_multiplier = 1.0
+            for key in self._discount_order:
+                meta = self.DISCOUNT_MAP.get(key)
+                if meta:
+                    d = float(meta["field"].value or 0)
+                    footer_multiplier *= (1 - d / 100)
+
             for item in self.order_items:
                 meta  = self.all_items_metadata.get(str(item["item_id"]), {})
                 inner = meta.get("pcs_per_inner_box",  1) or 1
@@ -627,20 +635,26 @@ class OrderEntryTab(ft.Column):
                 is_box = "box" in self.qty_type.selected
                 pcs   = item["qty"] * inner * outer if is_box else item["qty"]
                 boxes = item["qty"] if is_box else pcs / (inner * outer)
-                amount = pcs * item["rate"]
-                disc   = amount * (item.get("disc_p", 0) / 100)
+                
+                # Combine row-level and footer discounts into a single Net Rate
+                item_multiplier = (1 - item.get("disc_p", 0) / 100)
+                net_multiplier = item_multiplier * footer_multiplier
+                net_rate = item["rate"] * net_multiplier
+                
+                amount = pcs * net_rate
+                
                 insert("order_items", {
                     "order_id":        order_id,
                     "company_id":      state.company_id,
                     "item_id":         item["item_id"],
                     "size_value":      item["sizes_label"],
-                    "rate":            item["rate"],
+                    "rate":            round(net_rate, 2),
                     "qty_pieces":      int(pcs),
                     "qty_boxes":       float(boxes),
-                    "amount":          amount,
-                    "discount_amount": disc,
-                    "gross_amount":    amount - disc,
-                    "tax_percent":     5.0,
+                    "amount":          round(amount, 2),
+                    "discount_amount": 0, # Discounts are now baked into the rate
+                    "gross_amount":    round(amount, 2),
+                    "tax_percent":     self._party_gst_rate,
                 })
 
             # Fetch the saved order to generate PDF

@@ -20,10 +20,15 @@ class PackingSlipTab(ft.Column):
         self.expand  = True
         self.spacing = 0
 
-        self._pending_items   = []   # list of row-data dicts
-        self._all_items_meta  = {}
-        self._party_gst_rate  = 5.0
-        self._party_tax_type  = "GST"
+        self._pending_items        = []   # list of row-data dicts
+        self._pending_orders_map   = {}   # map of order_id -> order_data
+        self._selected_item_keys  = set() # tracked selected keys
+        self._all_items_meta       = {}
+        self._packed_slip_data     = []   # cached packing slip headers for this party
+        self._packed_items_data    = []   # cached packing slip items for these orders
+        self._party_gst_rate       = 5.0
+        self._party_tax_type       = "GST"
+        self._calculating          = False
 
         # ── Header ───────────────────────────────────────────
         S = AppStyles.get_input_style()
@@ -33,7 +38,7 @@ class PackingSlipTab(ft.Column):
         self.agent_dd  = ft.Dropdown(label="Agent",      width=180, **S)
         self.trans_dd  = ft.Dropdown(label="Transporter",width=200, **S)
         self.dest      = ft.TextField(label="Destination",width=160, **S)
-        self.cases     = ft.TextField(label="No of Cases",width=100, value="0", keyboard_type=ft.KeyboardType.NUMBER, **S)
+        self.cases     = ft.TextField(label="No of Cases",width=100, value="0", keyboard_type=ft.KeyboardType.NUMBER, on_change=self._update_case_balance, **S)
         self.prepared  = ft.TextField(label="Prepared By",width=140, **S)
         self.checked   = ft.TextField(label="Checked By", width=140, **S)
         self.packed_by = ft.TextField(label="Packed By",  width=140, **S)
@@ -149,12 +154,13 @@ class PackingSlipTab(ft.Column):
             bgcolor="#F1F5F9",
             padding=ft.padding.symmetric(horizontal=24, vertical=8),
             content=ft.Row([
+                ft.Checkbox(on_change=self.toggle_all, tooltip="Select All"),
                 ft.Text("ORDER NO",  width=110, size=11, weight="bold"),
                 ft.Text("ITEM NAME", width=185, size=11, weight="bold"),
                 ft.Text("SIZES",     width=90,  size=11, weight="bold"),
                 ft.Text("RATE",      width=70,  size=11, weight="bold", text_align=ft.TextAlign.RIGHT),
                 ft.Text("ORD QTY",  width=70,  size=11, weight="bold", text_align=ft.TextAlign.RIGHT),
-                ft.Text("AVAIL",     width=60,  size=11, weight="bold", text_align=ft.TextAlign.RIGHT),
+                ft.Text("BALANCE SHIPMENT", width=120, size=11, weight="bold", text_align=ft.TextAlign.RIGHT),
                 ft.Text("PACK QTY", width=90,  size=11, weight="bold", text_align=ft.TextAlign.RIGHT),
                 ft.Text("AMOUNT",   expand=True, size=11, weight="bold", text_align=ft.TextAlign.RIGHT),
             ]),
@@ -246,7 +252,39 @@ class PackingSlipTab(ft.Column):
     def _calc(self, e=None):
         self._update_totals()
         if self.page:
-            self.update()
+            try:
+                self.update()
+            except Exception:
+                pass
+
+    def _update_case_balance(self, e=None):
+        """Calculate the remaining balance of cases dynamically."""
+        try:
+            tot = int(self.total_order_cases.value or 0)
+            pck = int(self.packed_cases.value or 0)
+            cur = int(self.cases.value or 0)
+            self.balance_cases.value = str(tot - pck - cur)
+            if self.page:
+                self.balance_cases.update()
+        except Exception:
+            pass
+
+    def toggle_all(self, e):
+        """Select or deselect all pending items."""
+        if e.control.value:
+            self._selected_item_keys = {it["key"] for it in self._pending_items}
+        else:
+            self._selected_item_keys.clear()
+        self._rebuild_grid()
+
+    def on_item_toggle(self, key, val):
+        """Track individual item selection."""
+        if val:
+            self._selected_item_keys.add(key)
+        else:
+            self._selected_item_keys.discard(key)
+        # Rebuild grid so checkbox visuals match the new state
+        self._rebuild_grid()
 
     # ─── Dynamic Discount Order Helpers ──────────────────────
     def _reorder_discount_fields(self):
@@ -312,7 +350,7 @@ class PackingSlipTab(ft.Column):
             if self.page: self.update()
 
             order_ids = [str(o["id"]) for o in pending]
-            order_map = {str(o["id"]): o for o in pending}
+            self._pending_orders_map = {str(o["id"]): o for o in pending}
 
             # 2. BULK SELECT all items for these orders
             all_o_items = select("order_items", {"order_id": order_ids})
@@ -322,6 +360,10 @@ class PackingSlipTab(ft.Column):
             
             # 3. BULK SELECT all packed items for these orders to calculate availability
             all_packed = select("packing_slip_items", {"order_id": order_ids, "company_id": state.company_id})
+            
+            # Cache packed data for case tracking in _update_totals
+            self._packed_items_data = all_packed
+            self._packed_slip_data  = select("packing_slips", {"party_id": party_id, "company_id": state.company_id})
             
             # Group packed items by (order_id, item_id, size_value)
             packed_map = {}
@@ -336,7 +378,7 @@ class PackingSlipTab(ft.Column):
                 size_val   = oi["size_value"]
                 order_qty  = int(oi.get("qty_pieces", 0))
                 rate       = float(oi.get("rate", 0))
-                order_no   = order_map.get(order_id, {}).get("order_no", "ORD")
+                order_no   = self._pending_orders_map.get(order_id, {}).get("order_no", "ORD")
 
                 # Calculate already-packed qty from our memory map
                 already_packed = packed_map.get((order_id, item_id, size_val), 0)
@@ -350,8 +392,10 @@ class PackingSlipTab(ft.Column):
                 outer = meta.get("boxes_per_outer_box", 1) or 1
                 key   = f"{order_id}__{item_id}__{size_val}"
 
+                amt_lbl = ft.Text("₹0.00", expand=True, size=13, weight="bold",
+                                  text_align=ft.TextAlign.RIGHT, color=AppColors.PRIMARY)
                 tf = ft.TextField(
-                    value=str(available), width=80,
+                    value="0", width=80,
                     text_align=ft.TextAlign.CENTER,
                     keyboard_type=ft.KeyboardType.NUMBER,
                     on_change=lambda e, k=key, av=available: self._clamp(e, k, av),
@@ -363,8 +407,10 @@ class PackingSlipTab(ft.Column):
                     "size_value": size_val, "rate": rate,
                     "order_qty": order_qty, "available": available,
                     "inner": inner, "outer": outer,
-                    "tf": tf, "key": key,
+                    "tf": tf, "amt_lbl": amt_lbl, "key": key,
                 })
+                # Auto-select items that have availability
+                self._selected_item_keys.add(key)
             self._rebuild_grid()
         except Exception as e:
             print(f"Error loading pending orders: {e}")
@@ -402,28 +448,37 @@ class PackingSlipTab(ft.Column):
             self.items_col.controls = [self._make_row(it) for it in self._pending_items]
         self._update_totals()
         if self.page:
-            self.items_col.update()
+            try:
+                self.update()
+            except Exception:
+                pass
 
     def _make_row(self, it):
+        # Update the stored amount label with current value
         try:
             pcs = int(it["tf"].value or 0)
         except Exception:
             pcs = 0
         amount = pcs * it["rate"]
+        it["amt_lbl"].value = f"₹{amount:,.2f}"
+        
         return ft.Container(
             bgcolor=ft.colors.WHITE,
             padding=ft.padding.symmetric(horizontal=24, vertical=8),
             border=ft.border.only(bottom=ft.border.BorderSide(1, "#F1F5F9")),
             content=ft.Row([
+                ft.Checkbox(
+                    value=(it["key"] in self._selected_item_keys),
+                    on_change=lambda e, k=it["key"]: self.on_item_toggle(k, e.control.value)
+                ),
                 ft.Text(it["order_no"],            width=110, size=12, color=AppColors.PRIMARY),
                 ft.Text(it["item_name"],           width=185, size=13, weight="w500"),
                 ft.Text(it["size_value"],          width=90,  size=11, italic=True, color=AppColors.TEXT_SUB),
                 ft.Text(f"₹{it['rate']}",         width=70,  size=13, text_align=ft.TextAlign.RIGHT),
                 ft.Text(str(it["order_qty"]),      width=70,  size=12, text_align=ft.TextAlign.RIGHT),
-                ft.Text(str(it["available"]),      width=60,  size=12, text_align=ft.TextAlign.RIGHT, color="green"),
+                ft.Text(str(it["available"]),      width=120, size=12, text_align=ft.TextAlign.RIGHT, color="green"),
                 it["tf"],
-                ft.Text(f"₹{amount:,.2f}", expand=True, size=13, weight="bold",
-                        text_align=ft.TextAlign.RIGHT, color=AppColors.PRIMARY),
+                it["amt_lbl"],
             ]),
         )
 
@@ -431,39 +486,70 @@ class PackingSlipTab(ft.Column):
     # Totals
     # ─────────────────────────────────────────────────────────
     def _update_totals(self):
+        # Guard against recursive calls
+        if self._calculating:
+            return
+        self._calculating = True
+
         total_pcs = total_boxes = gross = 0.0
+        selected_order_ids = set()
+
         for it in self._pending_items:
+            # Update row-level amount label regardless of selection
             try:
-                pcs = int(it["tf"].value or 0)
+                row_pcs = int(it["tf"].value or 0)
             except Exception:
-                pcs = 0
-            boxes  = pcs / ((it["inner"] or 1) * (it["outer"] or 1))
-            amount = pcs * it["rate"]
-            total_pcs   += pcs
+                row_pcs = 0
+            row_amt = row_pcs * it["rate"]
+            if "amt_lbl" in it:
+                it["amt_lbl"].value = f"₹{row_amt:,.2f}"
+
+            # Skip unselected items for footer totals
+            if it["key"] not in self._selected_item_keys:
+                continue
+            
+            selected_order_ids.add(str(it["order_id"]))
+            inner = it["inner"] or 1
+            boxes = row_pcs / inner
+            total_pcs   += row_pcs
             total_boxes += boxes
-            gross       += amount
+            gross       += row_amt
+        
+        # Case Tracking from cached data (no DB calls)
+        tot_ord_cases = 0
+        packed_cases  = 0
+        for oid in selected_order_ids:
+            ord_data = self._pending_orders_map.get(oid, {})
+            tot_ord_cases += int(ord_data.get("no_of_cases") or 0)
+        
+        if selected_order_ids:
+            slip_ids = {str(r["packing_slip_id"]) for r in self._packed_items_data
+                        if r.get("packing_slip_id") and str(r.get("order_id")) in selected_order_ids}
+            if slip_ids:
+                packed_cases = sum(int(s.get("no_of_cases") or 0)
+                                  for s in self._packed_slip_data
+                                  if str(s["id"]) in slip_ids)
+
+        self.total_order_cases.value = str(tot_ord_cases)
+        self.packed_cases.value      = str(packed_cases)
+        self._update_case_balance()
+
+        # Footer totals
+        gst  = gross * (self._party_gst_rate / 100)
+        roff = 0.0
         try:
-            val = gross
-            for key in self._discount_order:
-                meta = self.DISCOUNT_MAP.get(key)
-                if meta:
-                    d = float(meta["field"].value or 0)
-                    val -= val * (d / 100)
-            gst = val * (self._party_gst_rate / 100)
-            # Update Footer Labels
-            self.total_pcs.value   = f"Total Pcs: {int(total_pcs)}"
-            self.total_boxes.value = f"Total Boxes: {total_boxes:.1f}"
-            self.aft_dis_amt.value = f"AftDis Amt: ₹{val:,.2f}"
-            self.taxable_val.value = f"Taxable: ₹{val:,.2f}"
-            self.gst_lbl.value     = f"{self._party_tax_type} ({self._party_gst_rate:.0f}%): ₹{gst:,.2f}"
-            
             roff = float(self.round_off.value or 0)
-            self.net_amt.value     = f"Total: ₹{val + gst + roff:,.2f}"
-            
-            if self.page:
-                self.update()
         except Exception:
             pass
+
+        self.total_pcs.value   = f"Total Pcs: {int(total_pcs)}"
+        self.total_boxes.value = f"Total Boxes: {total_boxes:.1f}"
+        self.aft_dis_amt.value = f"AftDis Amt: ₹{gross:,.2f}"
+        self.taxable_val.value = f"Taxable: ₹{gross:,.2f}"
+        self.gst_lbl.value     = f"{self._party_tax_type} ({self._party_gst_rate:.0f}%): ₹{gst:,.2f}"
+        self.net_amt.value     = f"Total: ₹{gross + gst + roff:,.2f}"
+
+        self._calculating = False
 
     # ─────────────────────────────────────────────────────────
     # Save
@@ -475,6 +561,10 @@ class PackingSlipTab(ft.Column):
 
         rows_to_pack = []
         for it in self._pending_items:
+            # Skip unselected items
+            if it["key"] not in self._selected_item_keys:
+                continue
+
             try:
                 qty = int(it["tf"].value or 0)
             except Exception:
@@ -489,17 +579,12 @@ class PackingSlipTab(ft.Column):
         try:
             # Build totals
             total_pcs = sum(q for _, q in rows_to_pack)
-            total_boxes = sum(q / ((it["inner"] or 1) * (it["outer"] or 1)) for it, q in rows_to_pack)
+            total_boxes = sum(q / (it["inner"] or 1) for it, q in rows_to_pack)
             gross = sum(q * it["rate"] for it, q in rows_to_pack)
+            gst = gross * (self._party_gst_rate / 100)
+            td_amt = 0
+            spd_amt = 0
             val = gross
-            for f in [self.trade_disc, self.scheme_disc]:
-                val -= val * (float(f.value or 0) / 100)
-            gst = val * (self._party_gst_rate / 100)
-
-            # Calculate discount amounts for database
-            td_amt  = val * (float(self.trade_disc.value or 0) / 100)
-            val_td  = val - td_amt
-            spd_amt = val_td * (float(self.scheme_disc.value or 0) / 100)
             
             slip_no = str(self.slip_no.value or f"PS-{uuid.uuid4().hex[:6].upper()}")
             slip_dt = str(self.slip_date.value or date.today().isoformat())
@@ -533,19 +618,19 @@ class PackingSlipTab(ft.Column):
                 "total_pcs":      int(total_pcs),
                 "total_boxes":    round(total_boxes, 2),
                 "total_amount":   round(gross, 2),
-                "aftdis_amount":  round(val, 2),
-                "td_percent":     float(self.trade_disc.value  or 0),
-                "td_amount":      round(td_amt, 2),
-                "spd_percent":    float(self.scheme_disc.value or 0),
-                "spd_amount":     round(spd_amt, 2),
-                "festival_percent": float(self.fest_disc.value or 0),
-                "scd_percent":    float(self.spec_disc.value   or 0),
-                "cd_percent":     float(self.cash_disc.value   or 0),
+                "aftdis_amount":  round(gross, 2),
+                "td_percent":     0,
+                "td_amount":      0,
+                "spd_percent":    0,
+                "spd_amount":     0,
+                "festival_percent": 0,
+                "scd_percent":    0,
+                "cd_percent":     0,
                 "tax_type":       self._party_tax_type,
                 "tax_per":        self._party_gst_rate,
                 "tax_amount":     round(gst, 2),
                 "round_off":      float(self.round_off.value or 0),
-                "net_amount":     round(val + gst + float(self.round_off.value or 0), 2),
+                "net_amount":     round(gross + gst + float(self.round_off.value or 0), 2),
                 "status":         "Unbilled",
             }
             
@@ -641,6 +726,7 @@ class PackingSlipTab(ft.Column):
         self.packed_cases.value      = "0"
         self.balance_cases.value     = "0"
         
+        self._selected_item_keys.clear()
         self._update_totals()
         if self.page:
             try:
