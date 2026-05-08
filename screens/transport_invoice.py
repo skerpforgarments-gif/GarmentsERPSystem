@@ -5,7 +5,7 @@ import json
 from datetime import date
 from core.state import state
 from core.theme import AppColors, AppStyles
-from database.db import select, insert, update
+from database.db import select, insert, update, delete, get_next_doc_no
 from core.pdf_gen import pdf_engine, print_pdf
 
 class TransportInvoiceTab(ft.Column):
@@ -25,6 +25,7 @@ class TransportInvoiceTab(ft.Column):
         self._selected_slips  = set()
         self._party_gst_rate  = 5.0
         self._party_tax_type  = "IGST"
+        self.current_edit_id  = None
 
         # ── Header ───────────────────────────────────────────
         S = AppStyles.get_input_style()
@@ -38,7 +39,7 @@ class TransportInvoiceTab(ft.Column):
         self.dest       = ft.TextField(label="Destination",width=150, **S)
         self.order_by   = ft.TextField(label="Order By",    width=130, **S)
         self.order_thro = ft.TextField(label="Order Thro'", width=130, **S)
-        self.price_list = ft.TextField(label="Price List",  width=150, **S)
+        self.price_list = ft.Dropdown(label="Price List",   width=150, **S)
         self.qty_type   = ft.TextField(label="Qty Type",    width=100, **S)
         
         # ── LR Details ──────────
@@ -53,26 +54,6 @@ class TransportInvoiceTab(ft.Column):
         self.total_pcs   = ft.Text("Total Pcs: 0",    size=13, weight="bold")
         self.total_boxes = ft.Text("Total Boxes: 0",  size=13, weight="bold")
         
-        # Sequential Discounts
-        self.td_p   = ft.TextField(label="Trade %",    value="0", width=80, on_change=self._calc, **S)
-        self.spd_p  = ft.TextField(label="Scheme %",   value="0", width=80, on_change=self._calc, **S)
-        self.fest_p = ft.TextField(label="Festival %", value="0", width=80, on_change=self._calc, **S)
-        self.scd_p  = ft.TextField(label="Special %",  value="0", width=80, on_change=self._calc, **S)
-        self.cd_p   = ft.TextField(label="Cash %",     value="0", width=80, on_change=self._calc, **S)
-
-        # --- Dynamic discount ordering ---
-        self.DEFAULT_DISCOUNT_ORDER = ["trade", "scheme", "festival", "scd", "cd"]
-        self.DISCOUNT_MAP = {
-            "trade":    {"field": self.td_p,   "label": "Trade %"},
-            "scheme":   {"field": self.spd_p,  "label": "Scheme %"},
-            "festival": {"field": self.fest_p,  "label": "Festival %"},
-            "scd":      {"field": self.scd_p,   "label": "Special %"},
-            "cd":       {"field": self.cd_p,    "label": "Cash %"},
-        }
-        self._discount_order = list(self.DEFAULT_DISCOUNT_ORDER)
-        self.discount_row = ft.Row(spacing=8)
-        self._reorder_discount_fields()
-
         self.taxable_val = ft.Text("Taxable: ₹0.00", size=14, weight="bold")
         self.gst_lbl     = ft.Text("IGST (5%): ₹0.00", size=13, color=AppColors.TEXT_SUB)
         self.round_off   = ft.TextField(label="Round Off", value="0.00", width=100, on_change=self._calc, **S)
@@ -144,10 +125,6 @@ class TransportInvoiceTab(ft.Column):
                 ft.Row([
                     ft.Column([self.total_pcs, self.total_boxes], spacing=4),
                     ft.Container(expand=True),
-                    ft.Column([
-                        self.discount_row,
-                        ft.Text("Calculated Sequentially in the order shown above", size=10, italic=True, color="#999")
-                    ], horizontal_alignment=ft.CrossAxisAlignment.END)
                 ]),
                 ft.Divider(height=1, color="#E2E8F0"),
                 ft.Row([
@@ -166,6 +143,8 @@ class TransportInvoiceTab(ft.Column):
 
     def did_mount(self):
         self.load_dropdowns()
+        if not self.inv_no.value:
+            self.inv_no.value = get_next_doc_no("transport_invoices", "T", state.company_id, "invoice_no")
 
     def load_dropdowns(self):
         if not state.company_id: return
@@ -173,9 +152,12 @@ class TransportInvoiceTab(ft.Column):
         agents       = select("agents",       {"company_id": state.company_id})
         transporters = select("transporters", {"company_id": state.company_id})
         
+        price_lists  = select("price_lists",  {"company_id": state.company_id})
+        
         self.party_dd.options = [ft.dropdown.Option(key=str(p["id"]), text=p["name"]) for p in parties]
         self.agent_dd.options = [ft.dropdown.Option(key=str(a["id"]), text=a["name"]) for a in agents]
         self.trans_dd.options = [ft.dropdown.Option(key=str(t["id"]), text=t["name"]) for t in transporters]
+        self.price_list.options = [ft.dropdown.Option(key=str(p["id"]), text=p["list_name"]) for p in price_lists]
         
         if self.page: self.update()
 
@@ -185,47 +167,16 @@ class TransportInvoiceTab(ft.Column):
         pdata = select("parties", {"id": party_id})
         if pdata:
             p = pdata[0]
-            self.td_p.value   = str(p.get("discount_trade", 0))
-            self.spd_p.value  = str(p.get("discount_scheme", 0))
-            self.fest_p.value = str(p.get("discount_festival", 0))
-            self.scd_p.value  = str(p.get("discount_scd", 0))
-            self.cd_p.value   = str(p.get("discount_cd", 0))
             self.dest.value   = p.get("delivery_city") or p.get("billing_city", "")
+            if p.get("agent_id"):       self.agent_dd.value   = str(p["agent_id"])
+            if p.get("transporter_id"): self.trans_dd.value   = str(p["transporter_id"])
+            if p.get("price_list_id"):  self.price_list.value = str(p["price_list_id"])
             self._party_gst_rate = float(p.get("gst_percent", 5) or 5)
             self._party_tax_type = p.get("tax_type", "IGST") or "IGST"
-            # Load dynamic discount order
-            self._load_discount_order(p.get("discount_order"))
         
         self.load_slips(party_id)
 
-    # ─── Dynamic Discount Order Helpers ──────────────────────
-    def _reorder_discount_fields(self):
-        """Rebuild the discount_row with fields in the current _discount_order."""
-        self.discount_row.controls = []
-        for key in self._discount_order:
-            meta = self.DISCOUNT_MAP.get(key)
-            if meta:
-                self.discount_row.controls.append(meta["field"])
 
-    def _load_discount_order(self, raw_order):
-        """Parse discount_order from party data and reorder the footer fields."""
-        if raw_order:
-            if isinstance(raw_order, str):
-                try:
-                    order = json.loads(raw_order)
-                except Exception:
-                    order = list(self.DEFAULT_DISCOUNT_ORDER)
-            elif isinstance(raw_order, list):
-                order = list(raw_order)
-            else:
-                order = list(self.DEFAULT_DISCOUNT_ORDER)
-            if set(order) == set(self.DEFAULT_DISCOUNT_ORDER) and len(order) == 5:
-                self._discount_order = order
-            else:
-                self._discount_order = list(self.DEFAULT_DISCOUNT_ORDER)
-        else:
-            self._discount_order = list(self.DEFAULT_DISCOUNT_ORDER)
-        self._reorder_discount_fields()
 
     def load_slips(self, party_id):
         self._available_slips = select("packing_slips", {
@@ -291,7 +242,8 @@ class TransportInvoiceTab(ft.Column):
             gst = taxable * (self._party_gst_rate / 100)
             
             self.total_pcs.value   = f"Total Pcs: {int(total_pcs)}"
-            self.total_boxes.value = f"Total Boxes: {total_boxes:.1f}"
+            self.total_boxes.value = f"Total Boxes: {int(total_boxes)}"
+            self.no_cases.value    = str(int(total_boxes))
             self.taxable_val.value = f"Taxable: ₹{taxable:,.2f}"
             self.gst_lbl.value     = f"{self._party_tax_type} ({self._party_gst_rate:.0f}%): ₹{gst:,.2f}"
             self.net_amt.value     = f"Total: ₹{taxable + gst:,.2f}"
@@ -325,6 +277,7 @@ class TransportInvoiceTab(ft.Column):
                 "destination":    self.dest.value,
                 "order_by":       self.order_by.value,
                 "order_thro":     self.order_thro.value,
+                "price_list_id":  self.price_list.value,
                 "qty_type":       self.qty_type.value,
                 "lr_no":          self.lr_no.value,
                 "lr_date":        self.lr_date.value,
@@ -348,9 +301,15 @@ class TransportInvoiceTab(ft.Column):
                 "status":         "Unbilled"
             }
             
-            res = insert("transport_invoices", header)
-            if not res: raise Exception("Failed to save invoice header")
-            ti_id = res[0]["id"]
+            res = None
+            if self.current_edit_id:
+                ti_id = self.current_edit_id
+                update("transport_invoices", header, {"id": ti_id})
+                delete("transport_invoice_items", {"transport_invoice_id": ti_id})
+            else:
+                res = insert("transport_invoices", header)
+                if not res: raise Exception("Failed to save invoice header")
+                ti_id = res[0]["id"]
             
             # Fetch company and party details for PDF
             comp_data = select("companies", {"id": state.company_id})
@@ -377,6 +336,7 @@ class TransportInvoiceTab(ft.Column):
                         "company_id":           state.company_id,
                         "transport_invoice_id": ti_id,
                         "packing_slip_id":      sid,
+                        "order_id":             it.get("order_id"),
                         "item_id":              it["item_id"],
                         "item_name":            it["item_name"],
                         "size_value":           it["size_value"],
@@ -388,6 +348,19 @@ class TransportInvoiceTab(ft.Column):
                     insert("transport_invoice_items", row)
                     all_items_for_pdf.append(row)
                 update("packing_slips", {"status": "Billed"}, {"id": sid})
+
+            # Collect unique internal order numbers for the PDF header
+            unique_orders = set()
+            for it in all_items_for_pdf:
+                oid = it.get("order_id")
+                if not oid: # Need to fetch from packing_slip_items if not in TI items
+                    ps_item = select("packing_slip_items", {"packing_slip_id": it["packing_slip_id"], "item_id": it["item_id"], "size_value": it["size_value"]})
+                    if ps_item: oid = ps_item[0].get("order_id")
+                
+                if oid:
+                    o_data = select("orders", {"id": oid})
+                    if o_data: unique_orders.add(o_data[0].get("order_no", "ORD"))
+            header["order_no"] = ", ".join(sorted(list(unique_orders)))
 
             # Generate PDF
             pdf_path = pdf_engine.generate_tax_invoice(header, all_items_for_pdf, company)
@@ -405,7 +378,7 @@ class TransportInvoiceTab(ft.Column):
         self.page.update()
 
     def clear_form(self):
-        self.inv_no.value = f"TI-{uuid.uuid4().hex[:6].upper()}"
+        self.inv_no.value = get_next_doc_no("transport_invoices", "T", state.company_id, "invoice_no")
         self.lr_no.value = ""
         self.no_cases.value = "0"
         self.weight.value = "0"
@@ -414,6 +387,7 @@ class TransportInvoiceTab(ft.Column):
         self._available_slips = []
         self.items_col.controls = []
         self.party_dd.value = None
+        self.current_edit_id = None
         self._calc()
         if self.page: self.update()
 
@@ -446,8 +420,14 @@ class TransportInvoiceTab(ft.Column):
                         ], expand=True),
                         ft.Text(f"Pcs: {inv.get('total_pcs', 0)}", size=12),
                         ft.Text(f"₹ {float(inv.get('net_amount', 0)):,.2f}", size=14, weight="bold", color=AppColors.PRIMARY),
-                        ft.IconButton(ft.icons.PRINT, tooltip="Print Invoice", icon_color=ft.colors.BLUE_700, 
-                                      on_click=lambda e, i=inv: self.print_history_invoice(i))
+                        ft.Row([
+                            ft.IconButton(ft.icons.EDIT_OUTLINED, tooltip="Edit Invoice", icon_color=AppColors.PRIMARY,
+                                          on_click=lambda e, i=inv: self.load_invoice_for_edit(i, dlg)),
+                            ft.IconButton(ft.icons.PRINT, tooltip="Print Invoice", icon_color=ft.colors.BLUE_700, 
+                                          on_click=lambda e, i=inv: self.print_history_invoice(i)),
+                            ft.IconButton(ft.icons.DELETE_OUTLINE, tooltip="Delete Invoice", icon_color="red",
+                                          on_click=lambda e, i=inv: self.delete_invoice_from_history(i, dlg))
+                        ])
                     ])
                 )
             )
@@ -465,13 +445,122 @@ class TransportInvoiceTab(ft.Column):
         dlg.open = False
         self.page.update()
 
-    def print_history_invoice(self, invoice):
+    def load_invoice_for_edit(self, invoice, dlg):
+        """Loads a past transport invoice into the main form for editing."""
         try:
-            items = select("transport_invoice_items", {"invoice_id": invoice["id"]})
-            comp_data = select("companies", {"id": state.company_id})
-            company = comp_data[0] if comp_data else {}
+            self._close_dialog(dlg)
+            self.clear_form()
             
-            pdf_path = pdf_engine.generate_tax_invoice(invoice, items, company)
-            print_pdf(pdf_path)
+            self.current_edit_id  = invoice["id"]
+            self.inv_no.value     = invoice.get("invoice_no", "")
+            self.inv_date.value   = invoice.get("invoice_date", "")
+            self.party_dd.value   = str(invoice.get("party_id")) if invoice.get("party_id") else None
+            self.agent_dd.value   = str(invoice.get("agent_id")) if invoice.get("agent_id") else None
+            self.trans_dd.value   = str(invoice.get("transporter_id")) if invoice.get("transporter_id") else None
+            self.dest.value       = invoice.get("destination", "")
+            self.order_by.value   = invoice.get("order_by", "")
+            self.order_thro.value = invoice.get("order_thro", "")
+            self.price_list.value = invoice.get("price_list", "")
+            self.qty_type.value   = invoice.get("qty_type", "")
+            self.lr_no.value      = invoice.get("lr_no", "")
+            self.lr_date.value    = invoice.get("lr_date", "")
+            self.no_cases.value   = str(invoice.get("no_case", 0))
+            self.case_no.value    = invoice.get("case_no", "")
+            self.weight.value     = str(invoice.get("tot_weight", 0))
+            self.charges.value    = str(invoice.get("charges", 0))
+            self.price_list.value = str(invoice.get("price_list_id")) if invoice.get("price_list_id") else None
+            self.round_off.value  = str(invoice.get("round_off", "0.00"))
+
+            # Load party GST info
+            if self.party_dd.value:
+                pdata = select("parties", {"id": self.party_dd.value})
+                if pdata:
+                    p = pdata[0]
+                    self._party_gst_rate = float(p.get("gst_percent", 5) or 5)
+                    self._party_tax_type = p.get("tax_type", "IGST") or "IGST"
+
+            # Load saved items as virtual slips for display
+            db_items = select("transport_invoice_items", {"transport_invoice_id": invoice["id"]})
+            
+            # Group items by packing_slip_id to reconstruct the slip rows
+            slip_groups = {}
+            for it in db_items:
+                psid = str(it.get("packing_slip_id", "direct"))
+                if psid not in slip_groups:
+                    slip_groups[psid] = {
+                        "id": psid,
+                        "slip_no": psid,
+                        "slip_date": invoice.get("invoice_date", ""),
+                        "no_of_items": 0,
+                        "total_pcs": 0,
+                        "total_boxes": 0,
+                        "total_amount": 0,
+                    }
+                slip_groups[psid]["no_of_items"] += 1
+                slip_groups[psid]["total_pcs"]   += int(it.get("qty_pieces", 0))
+                slip_groups[psid]["total_boxes"] += float(it.get("qty_boxes", 0))
+                slip_groups[psid]["total_amount"]+= float(it.get("amount", 0))
+
+            # Try to enrich with actual packing slip data
+            for psid, grp in slip_groups.items():
+                if psid != "direct":
+                    ps_data = select("packing_slips", {"id": psid})
+                    if ps_data:
+                        grp["slip_no"]   = ps_data[0].get("slip_no", psid)
+                        grp["slip_date"] = ps_data[0].get("slip_date", grp["slip_date"])
+
+            self._available_slips = list(slip_groups.values())
+            self._selected_slips = {str(s["id"]) for s in self._available_slips}
+            self.rebuild_grid()
+
+            self._snack(f"Loaded Invoice: {self.inv_no.value}", AppColors.PRIMARY)
         except Exception as ex:
-            self._snack(f"Error printing: {ex}", "red")
+            print(f"Edit Load Error: {ex}")
+            self._snack(f"Failed to load invoice: {ex}", "red")
+
+    def delete_invoice_from_history(self, invoice, dlg):
+        """Deletes a transport invoice and restores packing slip status."""
+        def confirm_delete(e):
+            try:
+                # Check if billed in a final invoice
+                if invoice.get("status") == "Invoiced":
+                    confirm_dlg.open = False
+                    self.page.update()
+                    self._snack("Cannot delete: This invoice is already included in a Sales Tax Invoice.", "orange")
+                    return
+
+                # 1. Identify associated packing slips
+                items = select("transport_invoice_items", {"transport_invoice_id": invoice["id"]})
+                slip_ids = {str(it["packing_slip_id"]) for it in items if it.get("packing_slip_id")}
+                
+                # 2. Restore Packing Slips to "Unbilled"
+                for sid in slip_ids:
+                    update("packing_slips", {"status": "Unbilled"}, {"id": sid})
+
+                # 3. Delete items and header
+                delete("transport_invoice_items", {"transport_invoice_id": invoice["id"]})
+                delete("transport_invoices", {"id": invoice["id"]})
+                
+                confirm_dlg.open = False
+                dlg.open = False
+                self.page.update()
+                self._snack(f"Invoice {invoice.get('invoice_no')} deleted.", "green")
+                self.show_history_modal(None)
+            except Exception as ex:
+                self._snack(f"Delete Error: {ex}", "red")
+
+        confirm_dlg = ft.AlertDialog(
+            title=ft.Text("Confirm Delete"),
+            content=ft.Text(f"Are you sure you want to delete transport invoice {invoice.get('invoice_no')}?"),
+            actions=[
+                ft.TextButton("Yes, Delete", on_click=confirm_delete, style=ft.ButtonStyle(color="red")),
+                ft.TextButton("Cancel", on_click=lambda e: self._close_dialog(confirm_dlg))
+            ]
+        )
+        self.page.overlay.append(confirm_dlg)
+        confirm_dlg.open = True
+        self.page.update()
+
+    def _close_dialog(self, dlg):
+        dlg.open = False
+        self.page.update()

@@ -105,8 +105,9 @@ class PDFGenerator:
         # 2. Info Grid
         info_data = [
             [f"Slip No: {slip_header.get('slip_no')}", f"Date: {slip_header.get('slip_date')}"],
-            [f"Party: {slip_header.get('party_name')}", f"Order No: {slip_header.get('party_order_no', '-')}"],
-            [f"Destination: {slip_header.get('destination', '-')}", f"Cases: {slip_header.get('no_of_cases', 0)}"]
+            [f"Party: {slip_header.get('party_name')}", f"Order No: {slip_header.get('order_no', '-')}"],
+            [f"Party Order No: {slip_header.get('party_order_no', '-')}", f"Destination: {slip_header.get('destination', '-')}"],
+            [f"Cases: {slip_header.get('no_of_cases', 0)}", ""]
         ]
         t = Table(info_data, colWidths=[3 * inch, 3 * inch])
         t.setStyle(TableStyle([
@@ -167,7 +168,7 @@ class PDFGenerator:
         # 2. Party Details
         party_info = [
             [Paragraph(f"<b>Billed To:</b><br/>{inv_header.get('party_name') or '-'}<br/>{inv_header.get('party_address') or ''}<br/>GSTIN: {inv_header.get('party_gstin') or '-'}", self.styles['Normal']),
-             Paragraph(f"Invoice No: <b>{inv_header.get('invoice_no') or '-'}</b><br/>Date: {inv_header.get('invoice_date') or '-'}<br/>LR No: {inv_header.get('lr_no') or '-'}<br/>Place of Supply: {inv_header.get('destination') or '-'}", self.styles['Normal'])]
+             Paragraph(f"Invoice No: <b>{inv_header.get('invoice_no') or '-'}</b><br/>Date: {inv_header.get('invoice_date') or '-'}<br/>Order No: {inv_header.get('order_no') or '-'}<br/>LR No: {inv_header.get('lr_no') or '-'}<br/>Place of Supply: {inv_header.get('destination') or '-'}", self.styles['Normal'])]
         ]
         t = Table(party_info, colWidths=[3.5 * inch, 3.5 * inch])
         t.setStyle(TableStyle([('VALIGN', (0,0), (-1,-1), 'TOP')]))

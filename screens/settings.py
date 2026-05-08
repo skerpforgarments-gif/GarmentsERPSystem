@@ -160,7 +160,14 @@ class SettingsScreen(ft.Container):
         self.flow_switch = ft.Switch(
             label="Direct Invoice Mode (Skip Packing/Transport)", 
             value=state.settings.get("direct_invoice", False),
-            on_change=self.toggle_flow,
+            on_change=self.save_all_settings,
+            active_color=AppColors.PRIMARY
+        )
+
+        self.tax_calc_switch = ft.Switch(
+            label="Tax on Gross Amount (Apply Discount after Tax)", 
+            value=state.settings.get("tax_on_gross", False),
+            on_change=self.save_all_settings,
             active_color=AppColors.PRIMARY
         )
         
@@ -172,7 +179,10 @@ class SettingsScreen(ft.Container):
                     ft.Text("SYSTEM PREFERENCES", size=10, weight="bold", color=AppColors.PRIMARY, style=ft.TextStyle(letter_spacing=1.0)),
                     ft.Divider(height=5, color=ft.colors.TRANSPARENT),
                     self.flow_switch,
-                    ft.Text("If enabled, Final Sales Invoices will pull items directly from Sales Orders instead of waiting for Transport Invoices.", size=12, color=AppColors.TEXT_SUB)
+                    ft.Text("If enabled, Final Sales Invoices will pull items directly from Sales Orders instead of waiting for Transport Invoices.", size=12, color=AppColors.TEXT_SUB),
+                    ft.Divider(height=10, color=ft.colors.TRANSPARENT),
+                    self.tax_calc_switch,
+                    ft.Text("If enabled, GST will be calculated on the full Gross amount before any multi-tier discounts are subtracted.", size=12, color=AppColors.TEXT_SUB)
                 ], spacing=10),
                 padding=24, bgcolor=AppColors.BG_CARD, border_radius=AppStyles.RADIUS, shadow=AppStyles.CARD_SHADOW, border=ft.border.all(1, "#F0F0F0")
             ),
@@ -202,8 +212,9 @@ class SettingsScreen(ft.Container):
             self.status_msg
         ], scroll=ft.ScrollMode.AUTO)
 
-    def toggle_flow(self, e):
+    def save_all_settings(self, e):
         state.settings["direct_invoice"] = self.flow_switch.value
+        state.settings["tax_on_gross"]   = self.tax_calc_switch.value
         state.save_settings()
         self.status_msg.value = "Preferences saved."
         if self.page: self.update()

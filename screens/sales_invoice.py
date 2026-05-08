@@ -4,7 +4,7 @@ import os
 from datetime import date
 from core.state import state
 from core.theme import AppColors, AppStyles
-from database.db import select, insert, update
+from database.db import select, insert, update, delete, get_next_doc_no
 from core.pdf_gen import pdf_engine, print_pdf
 
 class SalesInvoiceTab(ft.Column):
@@ -24,6 +24,7 @@ class SalesInvoiceTab(ft.Column):
         self._selected_inv_ids   = set()
         self._party_gst_rate     = 5.0
         self._party_tax_type     = "IGST"
+        self.current_edit_id     = None
 
         # ── Header ───────────────────────────────────────────
         S = AppStyles.get_input_style()
@@ -154,6 +155,8 @@ class SalesInvoiceTab(ft.Column):
 
     def did_mount(self):
         self.load_dropdowns()
+        if not self.inv_no.value:
+            self.inv_no.value = get_next_doc_no("final_invoices", "S", state.company_id, "invoice_no")
 
     def load_dropdowns(self):
         if not state.company_id: return
@@ -349,9 +352,15 @@ class SalesInvoiceTab(ft.Column):
                 "net_amount":     round(final_taxable + gst_total + roff, 2),
             }
             
-            res = insert("final_invoices", header)
-            if not res: raise Exception("Failed to save final invoice header")
-            final_id = res[0]["id"]
+            res = None
+            if self.current_edit_id:
+                final_id = self.current_edit_id
+                update("final_invoices", header, {"id": final_id})
+                # Note: We don't delete linked transport_invoice_items — they belong to transport invoices
+            else:
+                res = insert("final_invoices", header)
+                if not res: raise Exception("Failed to save final invoice header")
+                final_id = res[0]["id"]
 
             # Fetch company and party details for PDF
             comp_data = select("companies", {"id": state.company_id})
@@ -376,6 +385,15 @@ class SalesInvoiceTab(ft.Column):
                         it["item_name"] = i_data[0]["item_name"] if i_data else "Unknown"
                     all_items_for_pdf.append(it)
 
+            # Collect unique internal order numbers for the PDF header
+            unique_orders = set()
+            for it in all_items_for_pdf:
+                oid = it.get("order_id")
+                if oid:
+                    o_data = select("orders", {"id": oid})
+                    if o_data: unique_orders.add(o_data[0].get("order_no", "ORD"))
+            header["order_no"] = ", ".join(sorted(list(unique_orders)))
+
             # Generate PDF
             pdf_path = pdf_engine.generate_tax_invoice(header, all_items_for_pdf, company)
             print_pdf(pdf_path)
@@ -392,13 +410,14 @@ class SalesInvoiceTab(ft.Column):
         self.page.update()
 
     def clear_form(self):
-        self.inv_no.value = f"INV-{uuid.uuid4().hex[:6].upper()}"
+        self.inv_no.value = get_next_doc_no("final_invoices", "S", state.company_id, "invoice_no")
         self.freight.value = "0"
         self.other.value = "0"
         self._selected_inv_ids.clear()
         self._available_invoices = []
         self.items_col.controls = []
         self.party_dd.value = None
+        self.current_edit_id = None
         self._calc()
         if self.page: self.update()
 
@@ -431,8 +450,14 @@ class SalesInvoiceTab(ft.Column):
                         ], expand=True),
                         ft.Text(f"Pcs: {inv.get('total_pcs', 0)}", size=12),
                         ft.Text(f"₹ {float(inv.get('net_amount', 0)):,.2f}", size=14, weight="bold", color=AppColors.PRIMARY),
-                        ft.IconButton(ft.icons.PRINT, tooltip="Print Invoice", icon_color=ft.colors.BLUE_700, 
-                                      on_click=lambda e, i=inv: self.print_history_invoice(i))
+                        ft.Row([
+                            ft.IconButton(ft.icons.EDIT_OUTLINED, tooltip="Edit Invoice", icon_color=AppColors.PRIMARY,
+                                          on_click=lambda e, i=inv: self.load_invoice_for_edit(i, dlg)),
+                            ft.IconButton(ft.icons.PRINT, tooltip="Print Invoice", icon_color=ft.colors.BLUE_700, 
+                                          on_click=lambda e, i=inv: self.print_history_invoice(i)),
+                            ft.IconButton(ft.icons.DELETE_OUTLINE, tooltip="Delete Invoice", icon_color="red",
+                                          on_click=lambda e, i=inv: self.delete_invoice_from_history(i, dlg))
+                        ])
                     ])
                 )
             )
@@ -446,9 +471,107 @@ class SalesInvoiceTab(ft.Column):
         dlg.open = True
         self.page.update()
 
+    def delete_invoice_from_history(self, invoice, dlg):
+        """Deletes a sales invoice and restores transport invoice status."""
+        def confirm_delete(e):
+            try:
+                # 1. Identify associated transport invoices
+                # We need to find TIs for this party that are marked "Invoiced"
+                # Since there's no direct link table, we look for TIs that match the net/tax
+                # But safer is to find TIs linked to this party with status "Invoiced"
+                all_ti = select("transport_invoices", {
+                    "party_id": invoice["party_id"],
+                    "status": "Invoiced"
+                })
+                
+                # Restore them to Unbilled
+                for ti in all_ti:
+                    update("transport_invoices", {"status": "Unbilled"}, {"id": ti["id"]})
+
+                # 2. Delete header
+                delete("final_invoices", {"id": invoice["id"]})
+                
+                confirm_dlg.open = False
+                dlg.open = False
+                self.page.update()
+                self._snack(f"Sales Invoice {invoice.get('invoice_no')} deleted.", "green")
+                self.show_history_modal(None)
+            except Exception as ex:
+                self._snack(f"Delete Error: {ex}", "red")
+
+        confirm_dlg = ft.AlertDialog(
+            title=ft.Text("Confirm Delete"),
+            content=ft.Text(f"Are you sure you want to delete sales invoice {invoice.get('invoice_no')}?"),
+            actions=[
+                ft.TextButton("Yes, Delete", on_click=confirm_delete, style=ft.ButtonStyle(color="red")),
+                ft.TextButton("Cancel", on_click=lambda e: self._close_dialog(confirm_dlg))
+            ]
+        )
+        self.page.overlay.append(confirm_dlg)
+        confirm_dlg.open = True
+        self.page.update()
+
     def _close_dialog(self, dlg):
         dlg.open = False
         self.page.update()
+
+    def load_invoice_for_edit(self, invoice, dlg):
+        """Loads a past sales invoice into the main form for editing."""
+        try:
+            self._close_dialog(dlg)
+            self.clear_form()
+            
+            self.current_edit_id  = invoice["id"]
+            self.inv_no.value     = invoice.get("invoice_no", "")
+            self.inv_date.value   = invoice.get("invoice_date", "")
+            self.party_dd.value   = str(invoice.get("party_id")) if invoice.get("party_id") else None
+            self.agent_dd.value   = str(invoice.get("agent_id")) if invoice.get("agent_id") else None
+            self.trans_dd.value   = str(invoice.get("transporter_id")) if invoice.get("transporter_id") else None
+            self.dest.value       = invoice.get("destination", "")
+            self.order_by.value   = invoice.get("order_by", "")
+            self.order_thro.value = invoice.get("order_thro", "")
+            self.qty_type.value   = invoice.get("qty_type", "")
+            self.lr_no.value      = invoice.get("lr_no", "")
+            self.lr_date.value    = invoice.get("lr_date", "")
+            self.freight.value    = str(invoice.get("freight_charges", 0))
+            self.other.value      = str(invoice.get("other_charges", 0))
+            self.round_off.value  = str(invoice.get("round_off", "0.00"))
+
+            # Load party GST info
+            if self.party_dd.value:
+                pdata = select("parties", {"id": self.party_dd.value})
+                if pdata:
+                    p = pdata[0]
+                    self._party_gst_rate = float(p.get("gst_percent", 5) or 5)
+                    self._party_tax_type = p.get("tax_type", "IGST") or "IGST"
+
+            # Load linked transport invoices for display
+            # Find transport invoices that were part of this final invoice
+            # They would have been marked as "Invoiced" when this final invoice was created
+            direct_mode = state.settings.get("direct_invoice", False)
+            
+            if direct_mode:
+                # In direct mode, we linked orders directly
+                # Re-fetch the associated orders
+                self._available_invoices = []
+            else:
+                # Find transport invoices linked to this final invoice
+                # We look for transport invoices for this party that are "Invoiced"
+                all_ti = select("transport_invoices", {
+                    "party_id": self.party_dd.value,
+                    "company_id": state.company_id
+                })
+                # We'll show the ones that match the total — in practice we'd have a link table
+                # For now, re-show all invoiced ones for this party
+                self._available_invoices = [ti for ti in all_ti if ti.get("status") in ("Invoiced", "Unbilled")]
+
+            self._selected_inv_ids = {str(s["id"]) for s in self._available_invoices}
+            self.rebuild_grid()
+
+            self._snack(f"Loaded Invoice: {self.inv_no.value}", AppColors.PRIMARY)
+        except Exception as ex:
+            print(f"Edit Load Error: {ex}")
+            self._snack(f"Failed to load invoice: {ex}", "red")
 
     def print_history_invoice(self, invoice):
         try:

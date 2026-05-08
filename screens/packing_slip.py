@@ -2,10 +2,11 @@ import flet as ft
 import uuid
 import os
 import json
+import math
 from datetime import date
 from core.state import state
 from core.theme import AppColors, AppStyles
-from database.db import select, insert, update
+from database.db import select, insert, update, delete, get_next_doc_no, get_next_doc_no
 from core.pdf_gen import pdf_engine, print_pdf
 
 
@@ -29,6 +30,7 @@ class PackingSlipTab(ft.Column):
         self._party_gst_rate       = 5.0
         self._party_tax_type       = "GST"
         self._calculating          = False
+        self.current_edit_id       = None
 
         # ── Header ───────────────────────────────────────────
         S = AppStyles.get_input_style()
@@ -61,38 +63,18 @@ class PackingSlipTab(ft.Column):
         self.packed_cases      = ft.TextField(label="Packed Cases",  width=100, value="0", read_only=True, **S)
         self.balance_cases     = ft.TextField(label="Balance",       width=100, value="0", read_only=True, **S)
 
-        # ── Footer fields ────────────────────────────────────
         self.total_pcs   = ft.Text("Total Pcs: 0",   size=13, weight="bold")
         self.total_boxes = ft.Text("Total Boxes: 0", size=13, weight="bold")
-        self.trade_disc  = ft.TextField(label="Trade %",    value="0", width=80, on_change=self._calc, **S)
-        self.scheme_disc = ft.TextField(label="Scheme %",   value="0", width=80, on_change=self._calc, **S)
-        self.fest_disc   = ft.TextField(label="Festival %", value="0", width=80, on_change=self._calc, **S)
-        self.spec_disc   = ft.TextField(label="Special %",  value="0", width=80, on_change=self._calc, **S)
-        self.cash_disc   = ft.TextField(label="Cash %",     value="0", width=80, on_change=self._calc, **S)
 
-        # --- Dynamic discount ordering ---
-        self.DEFAULT_DISCOUNT_ORDER = ["trade", "scheme", "festival", "scd", "cd"]
-        self.DISCOUNT_MAP = {
-            "trade":    {"field": self.trade_disc,  "label": "Trade %"},
-            "scheme":   {"field": self.scheme_disc, "label": "Scheme %"},
-            "festival": {"field": self.fest_disc,   "label": "Festival %"},
-            "scd":      {"field": self.spec_disc,   "label": "Special %"},
-            "cd":       {"field": self.cash_disc,   "label": "Cash %"},
-        }
-        self._discount_order = list(self.DEFAULT_DISCOUNT_ORDER)
-        self.discount_row = ft.Row(spacing=10)
-        self._reorder_discount_fields()
         self.taxable_val = ft.Text("Taxable: ₹0.00",  size=14, weight="bold")
         self.gst_lbl     = ft.Text("GST (5%): ₹0.00", size=13, color=AppColors.TEXT_SUB)
         self.net_amt     = ft.Text("Total: ₹0.00",    size=20, weight="bold", color=AppColors.PRIMARY)
 
-        # Print/Export options
         self.print_mode = ft.RadioGroup(content=ft.Row([
             ft.Radio(value="Laser",      label="Laser"),
             ft.Radio(value="Dot Matrix", label="Dot Matrix"),
         ]), value="Laser")
         self.export_word = ft.Checkbox(label="Export To Word", value=False)
-        self.aft_dis_amt = ft.Text("AftDis Amt: ₹0.00", size=13, weight="w500")
         self.round_off   = ft.TextField(label="Round Off", value="0.00", width=100, on_change=self._calc, **S)
 
         # ── Scrollable items ──────────────────────────────────
@@ -181,8 +163,7 @@ class PackingSlipTab(ft.Column):
                     ], spacing=5),
                     ft.Container(expand=True),
                     ft.Column([
-                        self.discount_row,
-                        ft.Row([self.aft_dis_amt, ft.VerticalDivider(), self.round_off], alignment=ft.MainAxisAlignment.END),
+                        ft.Row([self.round_off], alignment=ft.MainAxisAlignment.END),
                     ], horizontal_alignment=ft.CrossAxisAlignment.END),
                 ]),
                 ft.Divider(height=1, color="#E2E8F0"),
@@ -220,7 +201,7 @@ class PackingSlipTab(ft.Column):
         self.agent_dd.options = [ft.dropdown.Option(key=str(a["id"]), text=a["name"]) for a in agents]
         
         if not self.slip_no.value:
-            self.slip_no.value = f"PS-{uuid.uuid4().hex[:6].upper()}"
+            self.slip_no.value = get_next_doc_no("packing_slips", "P", state.company_id, "slip_no")
             
         if self.page:
             self.update()
@@ -238,15 +219,8 @@ class PackingSlipTab(ft.Column):
             if p.get("transporter_id"): self.trans_dd.value   = str(p["transporter_id"])
             if p.get("agent_id"):       self.agent_dd.value   = str(p["agent_id"])
             self.dest.value = p.get("delivery_city") or p.get("billing_city", "")
-            self.trade_disc.value  = str(p.get("discount_trade",    0))
-            self.scheme_disc.value = str(p.get("discount_scheme",   0))
-            self.fest_disc.value   = str(p.get("discount_festival", 0))
-            self.spec_disc.value   = str(p.get("discount_scd",      0))
-            self.cash_disc.value   = str(p.get("discount_cd",       0))
             self._party_gst_rate   = float(p.get("gst_percent", 5) or 5)
             self._party_tax_type   = p.get("tax_type", "GST") or "GST"
-            # Load dynamic discount order
-            self._load_discount_order(p.get("discount_order"))
         self._load_pending_orders(party_id)
 
     def _calc(self, e=None):
@@ -286,34 +260,7 @@ class PackingSlipTab(ft.Column):
         # Rebuild grid so checkbox visuals match the new state
         self._rebuild_grid()
 
-    # ─── Dynamic Discount Order Helpers ──────────────────────
-    def _reorder_discount_fields(self):
-        """Rebuild the discount_row with fields in the current _discount_order."""
-        self.discount_row.controls = []
-        for key in self._discount_order:
-            meta = self.DISCOUNT_MAP.get(key)
-            if meta:
-                self.discount_row.controls.append(meta["field"])
 
-    def _load_discount_order(self, raw_order):
-        """Parse discount_order from party data and reorder the footer fields."""
-        if raw_order:
-            if isinstance(raw_order, str):
-                try:
-                    order = json.loads(raw_order)
-                except Exception:
-                    order = list(self.DEFAULT_DISCOUNT_ORDER)
-            elif isinstance(raw_order, list):
-                order = list(raw_order)
-            else:
-                order = list(self.DEFAULT_DISCOUNT_ORDER)
-            if set(order) == set(self.DEFAULT_DISCOUNT_ORDER) and len(order) == 5:
-                self._discount_order = order
-            else:
-                self._discount_order = list(self.DEFAULT_DISCOUNT_ORDER)
-        else:
-            self._discount_order = list(self.DEFAULT_DISCOUNT_ORDER)
-        self._reorder_discount_fields()
 
     # ─────────────────────────────────────────────────────────
     # Order loading
@@ -510,7 +457,8 @@ class PackingSlipTab(ft.Column):
             
             selected_order_ids.add(str(it["order_id"]))
             inner = it["inner"] or 1
-            boxes = row_pcs / inner
+            outer = it.get("outer", 1) or 1
+            boxes = row_pcs / (inner * outer)
             total_pcs   += row_pcs
             total_boxes += boxes
             gross       += row_amt
@@ -543,8 +491,7 @@ class PackingSlipTab(ft.Column):
             pass
 
         self.total_pcs.value   = f"Total Pcs: {int(total_pcs)}"
-        self.total_boxes.value = f"Total Boxes: {total_boxes:.1f}"
-        self.aft_dis_amt.value = f"AftDis Amt: ₹{gross:,.2f}"
+        self.total_boxes.value = f"Total Boxes: {math.ceil(total_boxes)}"
         self.taxable_val.value = f"Taxable: ₹{gross:,.2f}"
         self.gst_lbl.value     = f"{self._party_tax_type} ({self._party_gst_rate:.0f}%): ₹{gst:,.2f}"
         self.net_amt.value     = f"Total: ₹{gross + gst + roff:,.2f}"
@@ -579,7 +526,8 @@ class PackingSlipTab(ft.Column):
         try:
             # Build totals
             total_pcs = sum(q for _, q in rows_to_pack)
-            total_boxes = sum(q / (it["inner"] or 1) for it, q in rows_to_pack)
+            total_boxes = sum(q / ((it["inner"] or 1) * (it.get("outer", 1) or 1)) for it, q in rows_to_pack)
+            total_boxes = math.ceil(total_boxes)
             gross = sum(q * it["rate"] for it, q in rows_to_pack)
             gst = gross * (self._party_gst_rate / 100)
             td_amt = 0
@@ -638,10 +586,17 @@ class PackingSlipTab(ft.Column):
             comp_data = select("companies", {"id": state.company_id})
             company = comp_data[0] if comp_data else {}
 
-            res = insert("packing_slips", header)
-            if not res:
-                raise Exception("Failed to create packing slip header")
-            slip_id = res[0]["id"]
+            if self.current_edit_id:
+                # Update existing slip
+                slip_id = self.current_edit_id
+                update("packing_slips", header, {"id": slip_id})
+                # Clear old items
+                delete("packing_slip_items", {"packing_slip_id": slip_id})
+            else:
+                res = insert("packing_slips", header)
+                if not res:
+                    raise Exception("Failed to create packing slip header")
+                slip_id = res[0]["id"]
 
             # Insert items + update order status
             packed_items_for_pdf = []
@@ -658,7 +613,7 @@ class PackingSlipTab(ft.Column):
                     "size_value":     it.get("size_value") or "",
                     "rate":           it.get("rate") or 0,
                     "qty_pieces":     qty,
-                    "qty_boxes":      round(boxes, 2),
+                    "qty_boxes":      math.ceil(boxes),
                     "amount":         round(amount, 2),
                 }
                 insert("packing_slip_items", item_row)
@@ -668,12 +623,14 @@ class PackingSlipTab(ft.Column):
                 packed_by_order[it["order_id"]]["packed"] += qty
                 packed_by_order[it["order_id"]]["total"]  += it["order_qty"]
 
-            # Generate PDF
-            header["party_name"] = "Customer"
-            if self.party_dd.value:
-                party_data = select("parties", {"id": self.party_dd.value})
-                if party_data: header["party_name"] = party_data[0]["name"]
-            
+            # Collect unique internal order numbers for the PDF header
+            unique_orders = set()
+            for it, qty in rows_to_pack:
+                oid = str(it.get("order_id"))
+                if oid in self._pending_orders_map:
+                    unique_orders.add(self._pending_orders_map[oid].get("order_no", "ORD"))
+            header["order_no"] = ", ".join(sorted(list(unique_orders)))
+
             pdf_path = pdf_engine.generate_packing_slip(header, packed_items_for_pdf, company)
             print_pdf(pdf_path)
 
@@ -700,19 +657,16 @@ class PackingSlipTab(ft.Column):
     def _clear(self):
         self._pending_items = []
         self.items_col.controls = []
-        self.slip_no.value = f"PS-{uuid.uuid4().hex[:6].upper()}"
+        self.slip_no.value = get_next_doc_no("packing_slips", "P", state.company_id, "slip_no")
         self.party_dd.value = None
         self.agent_dd.value = None
         self.trans_dd.value = None
         self.dest.value     = ""
         self.cases.value    = "0"
         self.prepared.value = self.checked.value = self.packed_by.value = ""
-        self.trade_disc.value = self.scheme_disc.value = "0"
-        self.fest_disc.value = self.spec_disc.value = self.cash_disc.value = "0"
         self.round_off.value = "0.00"
         self.total_pcs.value = "Total Pcs: 0"
         self.total_boxes.value = "Total Boxes: 0"
-        self.aft_dis_amt.value = "AftDis Amt: ₹0.00"
         self.taxable_val.value = "Taxable: ₹0.00"
         self.gst_lbl.value = "GST (5%): ₹0.00"
         self.net_amt.value = "Total: ₹0.00"
@@ -727,6 +681,7 @@ class PackingSlipTab(ft.Column):
         self.balance_cases.value     = "0"
         
         self._selected_item_keys.clear()
+        self.current_edit_id = None
         self._update_totals()
         if self.page:
             try:
@@ -765,8 +720,14 @@ class PackingSlipTab(ft.Column):
                         ], expand=True),
                         ft.Text(f"Pcs: {s.get('total_pcs', 0)}", size=12),
                         ft.Text(f"Boxes: {float(s.get('total_boxes', 0)):.1f}", size=12),
-                        ft.IconButton(ft.icons.PRINT, tooltip="Print Slip", icon_color=ft.colors.BLUE_700, 
-                                      on_click=lambda e, ps=s: self.print_history_slip(ps))
+                        ft.Row([
+                            ft.IconButton(ft.icons.EDIT_OUTLINED, tooltip="Edit Slip", icon_color=AppColors.PRIMARY,
+                                          on_click=lambda e, ps=s: self.load_slip_for_edit(ps, dlg)),
+                            ft.IconButton(ft.icons.PRINT, tooltip="Print Slip", icon_color=ft.colors.BLUE_700, 
+                                          on_click=lambda e, ps=s: self.print_history_slip(ps)),
+                            ft.IconButton(ft.icons.DELETE_OUTLINE, tooltip="Delete Slip", icon_color="red",
+                                          on_click=lambda e, ps=s: self.delete_slip_from_history(ps, dlg))
+                        ])
                     ])
                 )
             )
@@ -780,9 +741,167 @@ class PackingSlipTab(ft.Column):
         dlg.open = True
         self.page.update()
 
+    def delete_slip_from_history(self, slip, dlg):
+        """Deletes a packing slip and its items, ensuring it's not billed."""
+        def confirm_delete(e):
+            try:
+                # Check if billed in a transport invoice
+                linked = select("transport_invoice_items", {"packing_slip_id": slip["id"]})
+                if linked:
+                    confirm_dlg.open = False
+                    self.page.update()
+                    self._snack("Cannot delete: This slip is already included in a Transport Invoice.", "orange")
+                    return
+
+                # 1. Delete items
+                delete("packing_slip_items", {"packing_slip_id": slip["id"]})
+                # 2. Delete header
+                delete("packing_slips", {"id": slip["id"]})
+                
+                confirm_dlg.open = False
+                dlg.open = False
+                self.page.update()
+                self._snack(f"Slip {slip.get('slip_no')} deleted.", "green")
+                self.show_history_modal(None)
+            except Exception as ex:
+                self._snack(f"Delete Error: {ex}", "red")
+
+        confirm_dlg = ft.AlertDialog(
+            title=ft.Text("Confirm Delete"),
+            content=ft.Text(f"Are you sure you want to delete slip {slip.get('slip_no')}?"),
+            actions=[
+                ft.TextButton("Yes, Delete", on_click=confirm_delete, style=ft.ButtonStyle(color="red")),
+                ft.TextButton("Cancel", on_click=lambda e: self._close_dialog(confirm_dlg))
+            ]
+        )
+        self.page.overlay.append(confirm_dlg)
+        confirm_dlg.open = True
+        self.page.update()
+
     def _close_dialog(self, dlg):
         dlg.open = False
         self.page.update()
+
+    def load_slip_for_edit(self, slip, dlg):
+        """Loads a past packing slip into the main form for editing."""
+        try:
+            self._close_dialog(dlg)
+            self._clear()
+            
+            self.current_edit_id    = slip["id"]
+            self.slip_no.value      = slip.get("slip_no", "")
+            self.slip_date.value    = slip.get("slip_date", "")
+            self.party_dd.value     = str(slip.get("party_id")) if slip.get("party_id") else None
+            self.agent_dd.value     = str(slip.get("agent_id")) if slip.get("agent_id") else None
+            self.trans_dd.value     = str(slip.get("transporter_id")) if slip.get("transporter_id") else None
+            self.dest.value         = slip.get("destination", "")
+            self.docs_by.value      = slip.get("documents_by", "Direct")
+            self.party_order_no.value = slip.get("party_order_no", "")
+            self.party_order_dt.value = slip.get("party_order_date", "")
+            self.order_by.value     = slip.get("order_by", "")
+            self.order_thro.value   = slip.get("order_thro", "DIRECT")
+            self.qty_type_dd.value  = slip.get("qty_type", "Pieces")
+            self.compliments.value  = slip.get("compliments", "")
+            self.cases.value        = str(slip.get("no_of_cases", 0))
+            self.prepared.value     = slip.get("prepared_by", "")
+            self.checked.value      = slip.get("checked_by", "")
+            self.packed_by.value    = slip.get("packed_by", "")
+            self.round_off.value    = str(slip.get("round_off", "0.00"))
+
+            # Load party GST info
+            if self.party_dd.value:
+                pdata = select("parties", {"id": self.party_dd.value})
+                if pdata:
+                    p = pdata[0]
+                    self._party_gst_rate = float(p.get("gst_percent", 5) or 5)
+                    self._party_tax_type = p.get("tax_type", "GST") or "GST"
+
+            # Load saved items back into the grid
+            db_items = select("packing_slip_items", {"packing_slip_id": slip["id"]})
+            S = AppStyles.get_input_style()
+            self._pending_items = []
+            self._selected_item_keys.clear()
+
+            # Build a map of how much was packed by ALL slips (across all orders involved)
+            # and how much was packed by THIS slip, so we can compute the real available qty.
+            order_ids_involved = list({str(it.get("order_id")) for it in db_items if it.get("order_id")})
+            
+            # Fetch original order items to get the full order qty
+            all_order_items = []
+            order_no_map = {}
+            for oid in order_ids_involved:
+                oi_list = select("order_items", {"order_id": oid})
+                all_order_items.extend(oi_list)
+                ord_data = select("orders", {"id": oid})
+                if ord_data:
+                    order_no_map[oid] = ord_data[0].get("order_no", "")
+
+            # Map: (order_id, item_id, size_value) -> original order qty
+            order_qty_map = {}
+            for oi in all_order_items:
+                k = (str(oi["order_id"]), str(oi["item_id"]), oi["size_value"])
+                order_qty_map[k] = int(oi.get("qty_pieces", 0))
+
+            # Fetch ALL packed items for these orders (from every packing slip)
+            all_packed = select("packing_slip_items", {"order_id": order_ids_involved, "company_id": state.company_id}) if order_ids_involved else []
+            
+            # Total packed by ALL slips
+            total_packed_map = {}
+            for r in all_packed:
+                k = (str(r["order_id"]), str(r["item_id"]), r["size_value"])
+                total_packed_map[k] = total_packed_map.get(k, 0) + int(r.get("qty_pieces", 0))
+
+            # Packed by THIS slip only
+            this_slip_map = {}
+            for it in db_items:
+                k = (str(it.get("order_id", "")), str(it["item_id"]), it.get("size_value", ""))
+                this_slip_map[k] = this_slip_map.get(k, 0) + int(it.get("qty_pieces", 0))
+
+            for it in db_items:
+                item_id   = str(it["item_id"])
+                meta      = self._all_items_meta.get(item_id, {})
+                inner     = meta.get("pcs_per_inner_box", 1) or 1
+                outer     = meta.get("boxes_per_outer_box", 1) or 1
+                size_val  = it.get("size_value", "")
+                rate      = float(it.get("rate", 0))
+                qty       = int(it.get("qty_pieces", 0))
+                order_id  = str(it.get("order_id", ""))
+                order_no  = order_no_map.get(order_id, "")
+
+                # Calculate real available: order_qty - packed_by_others
+                # packed_by_others = total_packed - this_slip_packed
+                lookup_key    = (order_id, item_id, size_val)
+                orig_order_qty = order_qty_map.get(lookup_key, qty)
+                total_packed   = total_packed_map.get(lookup_key, 0)
+                this_slip_qty  = this_slip_map.get(lookup_key, 0)
+                packed_by_others = total_packed - this_slip_qty
+                available = max(orig_order_qty - packed_by_others, qty)  # at least the current qty
+
+                key = f"{order_id}__{item_id}__{size_val}"
+                amt_lbl = ft.Text(f"₹{qty * rate:,.2f}", expand=True, size=13, weight="bold",
+                                  text_align=ft.TextAlign.RIGHT, color=AppColors.PRIMARY)
+                tf = ft.TextField(
+                    value=str(qty), width=80,
+                    text_align=ft.TextAlign.CENTER,
+                    keyboard_type=ft.KeyboardType.NUMBER,
+                    on_change=lambda e, k=key, av=available: self._clamp(e, k, av),
+                    **S,
+                )
+                self._pending_items.append({
+                    "order_id": order_id, "order_no": order_no,
+                    "item_id": item_id, "item_name": it.get("item_name") or meta.get("item_name", ""),
+                    "size_value": size_val, "rate": rate,
+                    "order_qty": orig_order_qty, "available": available,
+                    "inner": inner, "outer": outer,
+                    "tf": tf, "amt_lbl": amt_lbl, "key": key,
+                })
+                self._selected_item_keys.add(key)
+
+            self._rebuild_grid()
+            self._snack(f"Loaded Slip: {self.slip_no.value}", AppColors.PRIMARY)
+        except Exception as ex:
+            print(f"Edit Load Error: {ex}")
+            self._snack(f"Failed to load slip: {ex}", "red")
 
     def print_history_slip(self, slip):
         try:

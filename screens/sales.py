@@ -1,10 +1,11 @@
 import flet as ft
 import uuid
 import json
+import math
 from datetime import date
 from core.state import state
 from core.theme import AppColors, AppStyles
-from database.db import select, insert, update, delete
+from database.db import select, insert, update, delete, get_next_doc_no
 from components.size_matrix import SizeMatrixModal, sort_sizes
 from core.pdf_gen import pdf_engine, print_pdf
 import os
@@ -258,7 +259,7 @@ class OrderEntryTab(ft.Column):
         self.agent_dd.options       = [ft.dropdown.Option(key=str(a["id"]), text=a["name"])      for a in agents]
 
         if not self.order_no.value:
-            self.order_no.value = f"ORD-{uuid.uuid4().hex[:6].upper()}"
+            self.order_no.value = get_next_doc_no("orders", "O", state.company_id, "order_no")
 
         if self.page:
             self.update()
@@ -533,10 +534,17 @@ class OrderEntryTab(ft.Column):
                         meta["amt"].value = f"Amt: ₹{disc_amt:,.2f}"
                     val -= disc_amt
 
+            tax_on_gross = state.settings.get("tax_on_gross", False)
             gst_rate = self._party_gst_rate
-            gst      = val * (gst_rate / 100)
-            tax_label = self._party_tax_type
             
+            if tax_on_gross:
+                # Tax on Gross (before multi-tier discounts)
+                gst = gross_sum * (gst_rate / 100)
+            else:
+                # Tax on Net (after multi-tier discounts)
+                gst = val * (gst_rate / 100)
+                
+            tax_label = self._party_tax_type
             grand_total = val + gst
             rounded_total = round(grand_total)
             diff = rounded_total - grand_total
@@ -549,6 +557,7 @@ class OrderEntryTab(ft.Column):
             self.gst_amount.value    = f"{tax_label} ({gst_rate:.0f}%): ₹{gst:,.2f}"
             self.round_off.value     = f"{diff:+.2f}"
             self.gross_amount.value  = f"Total: ₹{rounded_total:,.2f}"
+            self.no_of_cases.value   = str(math.ceil(total_boxes))
             
             if self.page:
                 self.update()
@@ -690,7 +699,7 @@ class OrderEntryTab(ft.Column):
     # Clear
     # ─────────────────────────────────────────────────────────
     def clear_form(self, e=None):
-        self.order_no.value = f"ORD-{uuid.uuid4().hex[:6].upper()}"
+        self.order_no.value = get_next_doc_no("orders", "O", state.company_id, "order_no")
         self.order_date.value = date.today().isoformat()
         self.party_dd.value = None
         self.agent_dd.value = None
@@ -758,7 +767,9 @@ class OrderEntryTab(ft.Column):
                             ft.IconButton(ft.icons.EDIT_OUTLINED, tooltip="Edit Order", icon_color=AppColors.PRIMARY, 
                                           on_click=lambda e, o=ord: self.load_order_for_edit(o, dlg)),
                             ft.IconButton(ft.icons.PRINT, tooltip="Print Order", icon_color=ft.colors.BLUE_700, 
-                                          on_click=lambda e, o=ord: self.print_history_order(o))
+                                          on_click=lambda e, o=ord: self.print_history_order(o)),
+                            ft.IconButton(ft.icons.DELETE_OUTLINE, tooltip="Delete Order", icon_color="red",
+                                          on_click=lambda e, o=ord: self.delete_order_from_history(o, dlg))
                         ])
                     ])
                 )
@@ -847,6 +858,55 @@ class OrderEntryTab(ft.Column):
             return dt.strftime("%b %d, %Y %I:%M %p")
         except:
             return str(ts)[:16]
+
+    def delete_order_from_history(self, order, dlg):
+        """Deletes an order and its items from the database, checking for dependencies."""
+        def confirm_delete(e):
+            try:
+                # Check for dependent packing slips
+                linked_slips = select("packing_slip_items", {"order_id": order["id"]})
+                if linked_slips:
+                    confirm_dlg.open = False
+                    self.page.update()
+                    self.page.snack_bar = ft.SnackBar(
+                        ft.Text("Cannot delete order: It is linked to one or more Packing Slips. Delete the slips first."),
+                        bgcolor="orange"
+                    )
+                    self.page.snack_bar.open = True
+                    self.page.update()
+                    return
+
+                # 1. Delete associated order items
+                delete("order_items", {"order_id": order["id"]})
+                # 2. Delete the order itself
+                delete("orders", {"id": order["id"]})
+                
+                confirm_dlg.open = False
+                dlg.open = False
+                self.page.update()
+                
+                self.page.snack_bar = ft.SnackBar(ft.Text(f"Order {order.get('order_no')} deleted successfully"), bgcolor="green")
+                self.page.snack_bar.open = True
+                self.page.update()
+                
+                # Refresh history modal
+                self.show_history_modal(None)
+            except Exception as ex:
+                self.page.snack_bar = ft.SnackBar(ft.Text(f"Delete Error: {ex}"), bgcolor="red")
+                self.page.snack_bar.open = True
+                self.page.update()
+
+        confirm_dlg = ft.AlertDialog(
+            title=ft.Text("Confirm Delete"),
+            content=ft.Text(f"Are you sure you want to delete order {order.get('order_no')}? This cannot be undone."),
+            actions=[
+                ft.TextButton("Yes, Delete", on_click=confirm_delete, style=ft.ButtonStyle(color="red")),
+                ft.TextButton("Cancel", on_click=lambda e: self._close_dialog(confirm_dlg))
+            ]
+        )
+        self.page.overlay.append(confirm_dlg)
+        confirm_dlg.open = True
+        self.page.update()
 
     def _close_dialog(self, dlg):
         dlg.open = False
