@@ -239,7 +239,7 @@ class OrderEntryTab(ft.Column):
     def load_metadata(self):
         if not state.company_id:
             return
-        items = select("items", {"company_id": state.company_id})
+        items = select("items", {"company_id": state.company_id, "item_type": ["Sales", "Both"]})
         self.all_items_metadata = {str(i["id"]): i for i in items}
 
         self.matrix_modal = SizeMatrixModal(on_submit=self.add_matrix_results)
@@ -248,7 +248,7 @@ class OrderEntryTab(ft.Column):
             self.page.update()
         self.matrix_modal.load_items(items)
 
-        parties      = select("parties",      {"company_id": state.company_id})
+        parties      = select("parties",      {"company_id": state.company_id, "party_type": ["Customer", "Both"]})
         transporters = select("transporters", {"company_id": state.company_id})
         price_lists  = select("price_lists",  {"company_id": state.company_id})
         agents       = select("agents",       {"company_id": state.company_id})
@@ -546,7 +546,8 @@ class OrderEntryTab(ft.Column):
                 
             tax_label = self._party_tax_type
             grand_total = val + gst
-            rounded_total = round(grand_total)
+            # Round UP only (Increase only)
+            rounded_total = math.ceil(grand_total)
             diff = rounded_total - grand_total
 
             self.no_of_items_lbl.value = f"No. Of Items: {len(self.order_items)}"
@@ -555,7 +556,7 @@ class OrderEntryTab(ft.Column):
             self.total_units.value   = f"Total Units: {int(total_pcs)}"
             self.taxable_value.value = f"Taxable: ₹{val:,.2f}"
             self.gst_amount.value    = f"{tax_label} ({gst_rate:.0f}%): ₹{gst:,.2f}"
-            self.round_off.value     = f"{diff:+.2f}"
+            self.round_off.value     = f"{diff:0.2f}"
             self.gross_amount.value  = f"Total: ₹{rounded_total:,.2f}"
             self.no_of_cases.value   = str(math.ceil(total_boxes))
             
@@ -574,7 +575,7 @@ class OrderEntryTab(ft.Column):
             self.page.update()
             return
         try:
-            order_val = self.order_no.value or f"ORD-{uuid.uuid4().hex[:6].upper()}"
+            order_val = self.order_no.value or get_next_doc_no("orders", "O", state.company_id, "order_no")
             
             def safe_split_val(ctrl, default=0):
                 val = str(ctrl.value or "")
@@ -673,6 +674,12 @@ class OrderEntryTab(ft.Column):
                 p_data = select("parties", {"id": order_data["party_id"]})
                 if p_data:
                     order_data["party_name"] = p_data[0]["name"]
+                
+                if order_data.get("agent_id"):
+                    a_data = select("agents", {"id": order_data["agent_id"]})
+                    if a_data:
+                        order_data["agent_name"] = a_data[0]["name"]
+
                 
                 # We need all items for PDF
                 o_items = select("order_items", {"order_id": order_id})

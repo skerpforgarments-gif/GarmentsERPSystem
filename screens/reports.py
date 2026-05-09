@@ -302,7 +302,9 @@ class ReportsScreen(ft.Container):
             dt = inv.get("invoice_date", "")
             if fd <= dt <= td:
                 p_info = parties.get(str(inv.get("party_id")), {})
-                aid = str(p_info.get("agent_id"))
+                # Use invoice agent if available, else party agent
+                aid = str(inv.get("agent_id")) if inv.get("agent_id") else str(p_info.get("agent_id"))
+                if aid == "None": aid = None
                 
                 a_info = agents.get(aid, {"name": "Direct/No Agent", "comm": 0})
                 aname = a_info["name"]
@@ -411,7 +413,7 @@ class ReportsScreen(ft.Container):
             dt = inv.get("invoice_date", "")
             if fd <= dt <= td:
                 pid = str(inv.get("party_id"))
-                p_agent = str(parties.get(pid, {}).get("agent_id"))
+                p_agent = str(inv.get("agent_id")) if inv.get("agent_id") else str(parties.get(pid, {}).get("agent_id"))
                 if p_agent == aid:
                     net = float(inv.get("net_amount", 0))
                     comm = net * (comm_pct / 100)
@@ -449,7 +451,7 @@ class ReportsScreen(ft.Container):
 
         for inv in invoices:
             pid = str(inv.get("party_id"))
-            aid = parties.get(pid, {}).get("agent_id")
+            aid = str(inv.get("agent_id")) if inv.get("agent_id") else str(parties.get(pid, {}).get("agent_id"))
             if aid in agents:
                 agents[aid]["earned"] += float(inv.get("net_amount", 0)) * (agents[aid]["comm_pct"] / 100)
                 
@@ -476,7 +478,7 @@ class ReportsScreen(ft.Container):
         for inv in invoices:
             pid = str(inv.get("party_id"))
             p_info = parties.get(pid, {})
-            aid = p_info.get("agent_id")
+            aid = str(inv.get("agent_id")) if inv.get("agent_id") else str(p_info.get("agent_id"))
             if aid in agents:
                 net_amt = float(inv.get("net_amount", 0))
                 comm = net_amt * (agents[aid]["comm_pct"] / 100)

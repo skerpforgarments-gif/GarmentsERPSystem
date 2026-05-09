@@ -34,7 +34,7 @@ class DashboardScreen(ft.Container):
         )
 
         # Activity list (will be populated dynamically)
-        self.activity_col = ft.Column([], spacing=12)
+        self.activity_col = ft.Column([], spacing=12, scroll=ft.ScrollMode.AUTO)
         self.activity_loading = ft.ProgressRing(width=24, height=24, stroke_width=2, visible=False)
 
         # =========================
@@ -78,13 +78,13 @@ class DashboardScreen(ft.Container):
                     ),
                 ], vertical_alignment=ft.CrossAxisAlignment.CENTER),
                 ft.Container(
-                    expand=True,
                     padding=24,
                     bgcolor=AppColors.BG_CARD,
                     border_radius=AppStyles.RADIUS,
                     shadow=AppStyles.CARD_SHADOW,
                     border=ft.border.all(1, "#F0F0F0"),
-                    content=self.activity_col
+                    content=self.activity_col,
+                    height=400, # Ensure visibility
                 )
             ],
             spacing=0,
@@ -215,6 +215,14 @@ class DashboardScreen(ft.Container):
         self.activity_loading.visible = True
         if self.page: self.update()
 
+        # ── Pre-fetch Party Map for naming ──────────────────
+        party_map = {}
+        try:
+            all_parties = select("parties", {"company_id": state.company_id})
+            party_map = {str(p["id"]): p["name"] for p in all_parties}
+        except Exception as e:
+            print("Error pre-fetching parties:", e)
+
         try:
             # ── Stat cards ─────────────────────────────
             orders = select("orders", {"company_id": state.company_id})
@@ -222,7 +230,7 @@ class DashboardScreen(ft.Container):
             total_sales = sum(o.get("total_amount", 0) for o in orders)
 
             ledger = select("ledger_entries", {"company_id": state.company_id})
-            outstanding = sum(l.get("balance", 0) for l in ledger)
+            outstanding = sum(float(l.get("balance", 0) or 0) for l in ledger)
 
             self.sales_card.value_text.value = f"₹{round(total_sales, 2):,}"
             self.orders_card.value_text.value = str(total_orders)
@@ -232,18 +240,12 @@ class DashboardScreen(ft.Container):
             print("Dashboard stats error:", e)
 
         # ── Recent Activity (Dynamic) ──────────────
+        activity_items = []
+        company_filter = {"company_id": state.company_id}
+
+        # 1. Recent Orders
         try:
-            activity_items = []
-            company_filter = {"company_id": state.company_id}
-
-            # 1. Recent Orders
             recent_orders = select_recent("orders", company_filter, order_by="created_at", limit=5)
-            party_ids = list(set(str(o.get("party_id", "")) for o in recent_orders if o.get("party_id")))
-            party_map = {}
-            if party_ids:
-                all_parties = select("parties", {"company_id": state.company_id})
-                party_map = {str(p["id"]): p["name"] for p in all_parties}
-
             for o in recent_orders:
                 p_name = party_map.get(str(o.get("party_id", "")), "Unknown Party")
                 amount = o.get("net_amount") or o.get("total_amount") or 0
@@ -255,94 +257,98 @@ class DashboardScreen(ft.Container):
                     "icon": ft.icons.SHOPPING_BAG_OUTLINED,
                     "accent": AppColors.INFO,
                 })
+        except Exception as e:
+            print("Error loading recent orders:", e)
 
-            # 2. Recent Packing Slips
-            try:
-                recent_slips = select_recent("packing_slips", company_filter, order_by="created_at", limit=3)
-                for s in recent_slips:
-                    p_name = party_map.get(str(s.get("party_id", "")), "Unknown Party")
-                    activity_items.append({
-                        "title": f"Packing Slip {s.get('slip_no', '—')} — {p_name}",
-                        "subtitle": f"Pcs: {s.get('total_pcs', 0)} · Status: {s.get('status', 'Packed')}",
-                        "time": s.get("created_at", ""),
-                        "icon": ft.icons.INVENTORY_2_OUTLINED,
-                        "accent": "#8B5CF6",
-                    })
-            except Exception:
-                pass  # Table may not exist yet
+        # 2. Recent Packing Slips
+        try:
+            recent_slips = select_recent("packing_slips", company_filter, order_by="created_at", limit=3)
+            for s in recent_slips:
+                p_name = party_map.get(str(s.get("party_id", "")), "Unknown Party")
+                activity_items.append({
+                    "title": f"Packing Slip {s.get('slip_no', '—')} — {p_name}",
+                    "subtitle": f"Pcs: {s.get('total_pcs', 0)} · Status: {s.get('status', 'Packed')}",
+                    "time": s.get("created_at", ""),
+                    "icon": ft.icons.INVENTORY_2_OUTLINED,
+                    "accent": "#8B5CF6",
+                })
+        except Exception:
+            pass 
 
-            # 3. Recent Final Invoices
-            try:
-                recent_invoices = select_recent("final_invoices", company_filter, order_by="created_at", limit=3)
-                for inv in recent_invoices:
-                    p_name = party_map.get(str(inv.get("party_id", "")), "Unknown Party")
-                    amt = inv.get("net_amount") or inv.get("total_amount") or 0
-                    activity_items.append({
-                        "title": f"Invoice {inv.get('invoice_no', '—')} — {p_name}",
-                        "subtitle": f"₹{float(amt):,.2f} · Sales Invoice",
-                        "time": inv.get("created_at", ""),
-                        "icon": ft.icons.RECEIPT_LONG_OUTLINED,
-                        "accent": "#059669",
-                    })
-            except Exception:
-                pass
+        # 3. Recent Final Invoices
+        try:
+            recent_invoices = select_recent("final_invoices", company_filter, order_by="created_at", limit=3)
+            for inv in recent_invoices:
+                p_name = party_map.get(str(inv.get("party_id", "")), "Unknown Party")
+                amt = inv.get("net_amount") or inv.get("total_amount") or 0
+                activity_items.append({
+                    "title": f"Invoice {inv.get('invoice_no', '—')} — {p_name}",
+                    "subtitle": f"₹{float(amt):,.2f} · Sales Invoice",
+                    "time": inv.get("created_at", ""),
+                    "icon": ft.icons.RECEIPT_LONG_OUTLINED,
+                    "accent": "#059669",
+                })
+        except Exception:
+            pass
 
-            # 4. Recent Vouchers (Receipts)
-            try:
-                recent_receipts = select_recent("receipt_vouchers", company_filter, order_by="created_at", limit=3)
-                for v in recent_receipts:
-                    p_name = party_map.get(str(v.get("party_id", "")), "Unknown Party")
-                    activity_items.append({
-                        "title": f"Receipt Voucher — {p_name}",
-                        "subtitle": f"₹{float(v.get('amount', 0)):,.2f} · {v.get('mode', 'Cash')}",
-                        "time": v.get("created_at", ""),
-                        "icon": ft.icons.PAYMENTS_OUTLINED,
-                        "accent": "#D97706",
-                    })
-            except Exception:
-                pass
+        # 4. Recent Vouchers (Receipts)
+        try:
+            recent_receipts = select_recent("receipt_vouchers", company_filter, order_by="created_at", limit=3)
+            for v in recent_receipts:
+                p_name = party_map.get(str(v.get("party_id", "")), "Unknown Party")
+                activity_items.append({
+                    "title": f"Receipt Voucher — {p_name}",
+                    "subtitle": f"₹{float(v.get('amount', 0)):,.2f} · {v.get('mode', 'Cash')}",
+                    "time": v.get("created_at", ""),
+                    "icon": ft.icons.PAYMENTS_OUTLINED,
+                    "accent": "#D97706",
+                })
+        except Exception:
+            pass
 
-            # 5. Recently added Parties
-            try:
-                recent_parties = select_recent("parties", company_filter, order_by="created_at", limit=2)
-                for p in recent_parties:
-                    activity_items.append({
-                        "title": f"New Party: {p.get('name', '—')}",
-                        "subtitle": f"City: {p.get('city', '—')} · {p.get('party_type', 'Customer')}",
-                        "time": p.get("created_at", ""),
-                        "icon": ft.icons.PERSON_ADD_ALT_1_OUTLINED,
-                        "accent": "#7C3AED",
-                    })
-            except Exception:
-                pass
+        # 5. Recently added Parties
+        try:
+            recent_parties = select_recent("parties", company_filter, order_by="created_at", limit=2)
+            for p in recent_parties:
+                activity_items.append({
+                    "title": f"New Party: {p.get('name', '—')}",
+                    "subtitle": f"City: {p.get('billing_city', '—')} · {p.get('party_type', 'Customer')}",
+                    "time": p.get("created_at", ""),
+                    "icon": ft.icons.PERSON_ADD_ALT_1_OUTLINED,
+                    "accent": "#7C3AED",
+                })
+        except Exception:
+            pass
 
-            # 6. Recently added Items
-            try:
-                recent_items = select_recent("items", company_filter, order_by="created_at", limit=2)
-                for it in recent_items:
-                    activity_items.append({
-                        "title": f"New Item: {it.get('item_name', '—')}",
-                        "subtitle": f"Code: {it.get('item_code', '—')} · {it.get('category', 'General')}",
-                        "time": it.get("created_at", ""),
-                        "icon": ft.icons.CHECKROOM_OUTLINED,
-                        "accent": "#0891B2",
-                    })
-            except Exception:
-                pass
+        # 6. Recently added Items
+        try:
+            recent_items = select_recent("items", company_filter, order_by="created_at", limit=2)
+            for it in recent_items:
+                activity_items.append({
+                    "title": f"New Item: {it.get('item_name', '—')}",
+                    "subtitle": f"Code: {it.get('item_code', '—')} · {it.get('category', 'General')}",
+                    "time": it.get("created_at", ""),
+                    "icon": ft.icons.CHECKROOM_OUTLINED,
+                    "accent": "#0891B2",
+                })
+        except Exception:
+            pass
 
-            # ── Sort all activity by timestamp (newest first) ──
+        # ── Sort all activity by timestamp (newest first) ──
+        try:
             def sort_key(item):
                 ts = item.get("time", "")
-                if not ts:
-                    return ""
-                return ts
+                return str(ts) if ts else ""
 
             activity_items.sort(key=sort_key, reverse=True)
+        except Exception as e:
+            print("Error sorting activity items:", e)
 
-            # Limit to top 10 combined
-            activity_items = activity_items[:10]
+        # Limit to top 10 combined
+        activity_items = activity_items[:10]
 
-            # Build UI
+        # Build UI
+        try:
             self.activity_col.controls.clear()
             if not activity_items:
                 self.activity_col.controls.append(
@@ -366,12 +372,9 @@ class DashboardScreen(ft.Container):
                             accent=item.get("accent", AppColors.PRIMARY),
                         )
                     )
-
         except Exception as e:
-            print("Dashboard activity error:", e)
-            self.activity_col.controls = [
-                ft.Text(f"Could not load activity: {e}", size=12, color=AppColors.DANGER)
-            ]
+            print("Error building activity UI:", e)
+            self.activity_col.controls = [ft.Text(f"UI Error: {e}", color="red")]
 
         # Hide loading
         self.activity_loading.visible = False

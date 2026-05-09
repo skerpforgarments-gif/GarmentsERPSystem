@@ -62,6 +62,7 @@ class PackingSlipTab(ft.Column):
         self.total_order_cases = ft.TextField(label="Tot Ord Cases", width=100, value="0", read_only=True, **S)
         self.packed_cases      = ft.TextField(label="Packed Cases",  width=100, value="0", read_only=True, **S)
         self.balance_cases     = ft.TextField(label="Balance",       width=100, value="0", read_only=True, **S)
+        self.group_items       = ft.Switch(label="Group by Item", value=False, on_change=lambda _: self._load_pending_orders(self.party_dd.value), active_color=AppColors.PRIMARY)
 
         self.total_pcs   = ft.Text("Total Pcs: 0",   size=13, weight="bold")
         self.total_boxes = ft.Text("Total Boxes: 0", size=13, weight="bold")
@@ -102,7 +103,7 @@ class PackingSlipTab(ft.Column):
                         ft.Text("Packing Slip", size=22, weight="bold", color=AppColors.PRIMARY),
                         ft.OutlinedButton("View History", icon=ft.icons.HISTORY, on_click=self.show_history_modal, style=ft.ButtonStyle(color=AppColors.PRIMARY))
                     ], spacing=15),
-                    ft.Row([self.slip_no, self.slip_date], spacing=10),
+                    ft.Row([self.slip_no, self.slip_date, self.group_items], spacing=10),
                 ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
                 
                 # Row 2: Party and Tracking
@@ -191,10 +192,10 @@ class PackingSlipTab(ft.Column):
     def _load_dropdowns(self):
         if not state.company_id:
             return
-        parties      = select("parties",      {"company_id": state.company_id})
+        parties      = select("parties",      {"company_id": state.company_id, "party_type": ["Customer", "Both"]})
         transporters = select("transporters", {"company_id": state.company_id})
         agents       = select("agents",       {"company_id": state.company_id})
-        items        = select("items",        {"company_id": state.company_id})
+        items        = select("items",        {"company_id": state.company_id, "item_type": ["Sales", "Both"]})
         self._all_items_meta = {str(i["id"]): i for i in items}
         self.party_dd.options = [ft.dropdown.Option(key=str(p["id"]), text=p["name"]) for p in parties]
         self.trans_dd.options = [ft.dropdown.Option(key=str(t["id"]), text=t["name"]) for t in transporters]
@@ -319,45 +320,95 @@ class PackingSlipTab(ft.Column):
                 packed_map[k] = packed_map.get(k, 0) + int(r.get("qty_pieces", 0))
 
             S = AppStyles.get_input_style()
-            for oi in all_o_items:
-                order_id   = str(oi["order_id"])
-                item_id    = str(oi["item_id"])
-                size_val   = oi["size_value"]
-                order_qty  = int(oi.get("qty_pieces", 0))
-                rate       = float(oi.get("rate", 0))
-                order_no   = self._pending_orders_map.get(order_id, {}).get("order_no", "ORD")
+            
+            if self.group_items.value:
+                # Grouped Flow: Aggregate by (item_id, size_val)
+                grouped_data = {}
+                for oi in all_o_items:
+                    item_id = str(oi["item_id"])
+                    size_val = oi["size_value"]
+                    order_id = str(oi["order_id"])
+                    order_qty = int(oi.get("qty_pieces", 0))
+                    rate = float(oi.get("rate", 0))
+                    
+                    already_packed = packed_map.get((order_id, item_id, size_val), 0)
+                    available = order_qty - already_packed
+                    
+                    if available <= 0: continue
+                    
+                    k = (item_id, size_val)
+                    if k not in grouped_data:
+                        grouped_data[k] = {
+                            "item_id": item_id, "size_value": size_val,
+                            "rate": rate, "total_available": 0,
+                            "sources": [] # [(order_id, avail), ...]
+                        }
+                    grouped_data[k]["total_available"] += available
+                    grouped_data[k]["sources"].append({"order_id": order_id, "avail": available, "order_qty": order_qty})
 
-                # Calculate already-packed qty from our memory map
-                already_packed = packed_map.get((order_id, item_id, size_val), 0)
-                available      = order_qty - already_packed
-                
-                if available <= 0:
-                    continue
+                for k, g in grouped_data.items():
+                    item_id, size_val = k
+                    meta = self._all_items_meta.get(item_id, {})
+                    inner = meta.get("pcs_per_inner_box", 1) or 1
+                    outer = meta.get("boxes_per_outer_box", 1) or 1
+                    available = g["total_available"]
+                    
+                    key = f"GRP__{item_id}__{size_val}"
+                    amt_lbl = ft.Text("₹0.00", expand=True, size=13, weight="bold", text_align=ft.TextAlign.RIGHT, color=AppColors.PRIMARY)
+                    tf = ft.TextField(
+                        value="0", width=80, text_align=ft.TextAlign.CENTER,
+                        keyboard_type=ft.KeyboardType.NUMBER,
+                        on_change=lambda e, k=key, av=available: self._clamp(e, k, av),
+                        **S,
+                    )
+                    self._pending_items.append({
+                        "order_id": "Multiple", "order_no": "GRP",
+                        "item_id": item_id, "item_name": meta.get("item_name", "Unknown"),
+                        "size_value": size_val, "rate": g["rate"],
+                        "order_qty": available, "available": available,
+                        "inner": inner, "outer": outer,
+                        "tf": tf, "amt_lbl": amt_lbl, "key": key,
+                        "sources": g["sources"]
+                    })
+                    self._selected_item_keys.add(key)
+            else:
+                for oi in all_o_items:
+                    order_id   = str(oi["order_id"])
+                    item_id    = str(oi["item_id"])
+                    size_val   = oi["size_value"]
+                    order_qty  = int(oi.get("qty_pieces", 0))
+                    rate       = float(oi.get("rate", 0))
+                    order_no   = self._pending_orders_map.get(order_id, {}).get("order_no", "ORD")
 
-                meta  = self._all_items_meta.get(item_id, {})
-                inner = meta.get("pcs_per_inner_box",  1) or 1
-                outer = meta.get("boxes_per_outer_box", 1) or 1
-                key   = f"{order_id}__{item_id}__{size_val}"
+                    already_packed = packed_map.get((order_id, item_id, size_val), 0)
+                    available      = order_qty - already_packed
+                    
+                    if available <= 0:
+                        continue
 
-                amt_lbl = ft.Text("₹0.00", expand=True, size=13, weight="bold",
-                                  text_align=ft.TextAlign.RIGHT, color=AppColors.PRIMARY)
-                tf = ft.TextField(
-                    value="0", width=80,
-                    text_align=ft.TextAlign.CENTER,
-                    keyboard_type=ft.KeyboardType.NUMBER,
-                    on_change=lambda e, k=key, av=available: self._clamp(e, k, av),
-                    **S,
-                )
-                self._pending_items.append({
-                    "order_id": order_id, "order_no": order_no,
-                    "item_id": item_id, "item_name": meta.get("item_name", ""),
-                    "size_value": size_val, "rate": rate,
-                    "order_qty": order_qty, "available": available,
-                    "inner": inner, "outer": outer,
-                    "tf": tf, "amt_lbl": amt_lbl, "key": key,
-                })
-                # Auto-select items that have availability
-                self._selected_item_keys.add(key)
+                    meta  = self._all_items_meta.get(item_id, {})
+                    inner = meta.get("pcs_per_inner_box",  1) or 1
+                    outer = meta.get("boxes_per_outer_box", 1) or 1
+                    key   = f"{order_id}__{item_id}__{size_val}"
+
+                    amt_lbl = ft.Text("₹0.00", expand=True, size=13, weight="bold",
+                                      text_align=ft.TextAlign.RIGHT, color=AppColors.PRIMARY)
+                    tf = ft.TextField(
+                        value="0", width=80,
+                        text_align=ft.TextAlign.CENTER,
+                        keyboard_type=ft.KeyboardType.NUMBER,
+                        on_change=lambda e, k=key, av=available: self._clamp(e, k, av),
+                        **S,
+                    )
+                    self._pending_items.append({
+                        "order_id": order_id, "order_no": order_no,
+                        "item_id": item_id, "item_name": meta.get("item_name", "Unknown"),
+                        "size_value": size_val, "rate": rate,
+                        "order_qty": order_qty, "available": available,
+                        "inner": inner, "outer": outer,
+                        "tf": tf, "amt_lbl": amt_lbl, "key": key,
+                    })
+                    self._selected_item_keys.add(key)
             self._rebuild_grid()
         except Exception as e:
             print(f"Error loading pending orders: {e}")
@@ -484,17 +535,17 @@ class PackingSlipTab(ft.Column):
 
         # Footer totals
         gst  = gross * (self._party_gst_rate / 100)
-        roff = 0.0
-        try:
-            roff = float(self.round_off.value or 0)
-        except Exception:
-            pass
+        
+        subtotal = gross + gst
+        final_amt = math.ceil(subtotal)
+        roff = final_amt - subtotal
 
         self.total_pcs.value   = f"Total Pcs: {int(total_pcs)}"
         self.total_boxes.value = f"Total Boxes: {math.ceil(total_boxes)}"
         self.taxable_val.value = f"Taxable: ₹{gross:,.2f}"
         self.gst_lbl.value     = f"{self._party_tax_type} ({self._party_gst_rate:.0f}%): ₹{gst:,.2f}"
-        self.net_amt.value     = f"Total: ₹{gross + gst + roff:,.2f}"
+        self.round_off.value   = f"{roff:.2f}"
+        self.net_amt.value     = f"Total: ₹{final_amt:,.2f}"
 
         self._calculating = False
 
@@ -534,7 +585,7 @@ class PackingSlipTab(ft.Column):
             spd_amt = 0
             val = gross
             
-            slip_no = str(self.slip_no.value or f"PS-{uuid.uuid4().hex[:6].upper()}")
+            slip_no = str(self.slip_no.value or get_next_doc_no("packing_slips", "P", state.company_id, "slip_no"))
             slip_dt = str(self.slip_date.value or date.today().isoformat())
             slip_yr = slip_dt.split("-")[0] if "-" in slip_dt else ""
 
@@ -601,27 +652,52 @@ class PackingSlipTab(ft.Column):
             # Insert items + update order status
             packed_items_for_pdf = []
             packed_by_order = {}
+            
             for it, qty in rows_to_pack:
-                boxes  = qty / ((it["inner"] or 1) * (it["outer"] or 1))
-                amount = qty * it["rate"]
-                item_row = {
-                    "company_id":     state.company_id,
-                    "packing_slip_id": slip_id,
-                    "order_id":       it.get("order_id") or None,
-                    "item_id":        it.get("item_id") or None,
-                    "item_name":      it.get("item_name") or "",
-                    "size_value":     it.get("size_value") or "",
-                    "rate":           it.get("rate") or 0,
-                    "qty_pieces":     qty,
-                    "qty_boxes":      math.ceil(boxes),
-                    "amount":         round(amount, 2),
-                }
-                insert("packing_slip_items", item_row)
-                packed_items_for_pdf.append(item_row)
-                
-                packed_by_order.setdefault(it["order_id"], {"packed": 0, "total": 0})
-                packed_by_order[it["order_id"]]["packed"] += qty
-                packed_by_order[it["order_id"]]["total"]  += it["order_qty"]
+                # Distribute quantity across source orders (if grouped)
+                fulfillments = []
+                if it["key"].startswith("GRP__"):
+                    remaining = qty
+                    for src in it.get("sources", []):
+                        if remaining <= 0: break
+                        take = min(remaining, src["avail"])
+                        fulfillments.append({
+                            "order_id": src["order_id"],
+                            "qty": take,
+                            "order_qty": src["order_qty"]
+                        })
+                        remaining -= take
+                else:
+                    fulfillments.append({
+                        "order_id": it["order_id"],
+                        "qty": qty,
+                        "order_qty": it["order_qty"]
+                    })
+
+                for f in fulfillments:
+                    f_qty = f["qty"]
+                    boxes  = f_qty / ((it["inner"] or 1) * (it["outer"] or 1))
+                    amount = f_qty * it["rate"]
+                    
+                    item_row = {
+                        "company_id":     state.company_id,
+                        "packing_slip_id": slip_id,
+                        "order_id":       f["order_id"],
+                        "item_id":        it.get("item_id"),
+                        "item_name":      it.get("item_name") or "",
+                        "size_value":     it.get("size_value") or "",
+                        "rate":           it.get("rate") or 0,
+                        "qty_pieces":     f_qty,
+                        "qty_boxes":      math.ceil(boxes),
+                        "amount":         round(amount, 2),
+                    }
+                    insert("packing_slip_items", item_row)
+                    packed_items_for_pdf.append(item_row)
+                    
+                    oid = f["order_id"]
+                    packed_by_order.setdefault(oid, {"packed": 0, "total": 0})
+                    packed_by_order[oid]["packed"] += f_qty
+                    packed_by_order[oid]["total"]  = f["order_qty"] # Note: we use the order item's total qty
 
             # Collect unique internal order numbers for the PDF header
             unique_orders = set()
@@ -635,8 +711,16 @@ class PackingSlipTab(ft.Column):
             print_pdf(pdf_path)
 
             # Update order statuses
-            for order_id, counts in packed_by_order.items():
-                new_status = "Packed" if counts["packed"] >= counts["total"] else "Partial"
+            for order_id in packed_by_order.keys():
+                # 1. Total pieces required in this order
+                o_items = select("order_items", {"order_id": order_id})
+                total_req = sum(int(oi.get("qty_pieces", 0)) for oi in o_items)
+                
+                # 2. Total pieces already packed (including those in THIS current slip)
+                p_items = select("packing_slip_items", {"order_id": order_id})
+                total_packed = sum(int(pi.get("qty_pieces", 0)) for pi in p_items)
+                
+                new_status = "Packed" if total_packed >= total_req else "Partial"
                 update("orders", {"status": new_status}, {"id": order_id})
 
             self._snack(f"✅ Packing Slip {slip_no} saved and PDF generated!", "green")
@@ -753,10 +837,33 @@ class PackingSlipTab(ft.Column):
                     self._snack("Cannot delete: This slip is already included in a Transport Invoice.", "orange")
                     return
 
+                # Identify affected orders before deletion
+                items = select("packing_slip_items", {"packing_slip_id": slip["id"]})
+                order_ids = list({str(it["order_id"]) for it in items if it.get("order_id")})
+
                 # 1. Delete items
                 delete("packing_slip_items", {"packing_slip_id": slip["id"]})
                 # 2. Delete header
                 delete("packing_slips", {"id": slip["id"]})
+                
+                # 3. Recalculate status for each affected order
+                for oid in order_ids:
+                    # Total pieces required
+                    o_items = select("order_items", {"order_id": oid})
+                    total_req = sum(int(oi.get("qty_pieces", 0)) for oi in o_items)
+                    
+                    # Total pieces still packed (after deletion)
+                    p_items = select("packing_slip_items", {"order_id": oid})
+                    total_packed = sum(int(pi.get("qty_pieces", 0)) for pi in p_items)
+                    
+                    if total_packed == 0:
+                        new_status = "Pending"
+                    elif total_packed >= total_req:
+                        new_status = "Packed"
+                    else:
+                        new_status = "Partial"
+                    
+                    update("orders", {"status": new_status}, {"id": oid})
                 
                 confirm_dlg.open = False
                 dlg.open = False

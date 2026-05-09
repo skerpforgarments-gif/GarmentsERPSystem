@@ -76,12 +76,14 @@ CREATE TABLE agents (
 );
 
 CREATE TABLE banks (
-    id          UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    company_id  UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
-    name        TEXT NOT NULL,
-    account_no  TEXT,
-    ifsc_code   TEXT,
-    branch      TEXT
+    id               UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    company_id       UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+    name             TEXT NOT NULL,
+    account_holder   TEXT,
+    account_no       TEXT,
+    ifsc_code        TEXT,
+    branch           TEXT,
+    opening_balance  NUMERIC(15,2) DEFAULT 0
 );
 
 CREATE TABLE taxes (
@@ -110,12 +112,16 @@ CREATE TABLE staff (
 );
 
 CREATE TABLE expense_ledgers (
-    id           UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    company_id   UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
-    name         TEXT NOT NULL,
-    account_code TEXT,
-    ledger_type  TEXT DEFAULT 'Expense',  -- Expense / Income / Asset / Liability
-    description  TEXT
+    id               UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    company_id       UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+    name             TEXT NOT NULL,
+    account_code     TEXT,
+    group_name       TEXT DEFAULT 'Indirect Expenses',
+    hsn_sac          TEXT,
+    opening_balance  NUMERIC(15,2) DEFAULT 0,
+    opn_bal_type     TEXT DEFAULT 'DEBIT',
+    tax_id           UUID REFERENCES taxes(id),
+    description      TEXT
 );
 
 CREATE TABLE general_items (
@@ -141,6 +147,7 @@ CREATE TABLE items (
     variety             TEXT,
     style               TEXT,
     item_name           TEXT NOT NULL,
+    item_type           TEXT DEFAULT 'Sales',        -- Sales / Supplies / Both
     sizes               TEXT[] NOT NULL DEFAULT '{}',
     pcs_per_inner_box   INTEGER DEFAULT 1,
     boxes_per_outer_box INTEGER DEFAULT 1,
@@ -189,6 +196,7 @@ CREATE TABLE parties (
     company_id          UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
     -- Basic Info
     name                TEXT NOT NULL,
+    party_type          TEXT DEFAULT 'Both',   -- Customer / Supplier / Both
     -- Billing Address
     billing_address_line1  TEXT,
     billing_address_line2  TEXT,
@@ -259,6 +267,7 @@ CREATE TABLE parties (
     remarks             TEXT,
     is_approved         BOOLEAN DEFAULT TRUE,
     is_blocked          BOOLEAN DEFAULT FALSE,
+    party_type          TEXT DEFAULT 'Both',
     created_at          TIMESTAMP DEFAULT now(),
     UNIQUE(company_id, code),
     UNIQUE(company_id, name)
@@ -604,6 +613,7 @@ CREATE TABLE receipt_vouchers (
     agent_id        UUID REFERENCES agents(id),
     amount          NUMERIC(12,2) DEFAULT 0,
     mode            TEXT,  -- Cash / Bank / Cheque
+    bank_id         UUID REFERENCES banks(id),
     narration       TEXT,
     created_at      TIMESTAMP DEFAULT now()
 );
@@ -618,6 +628,7 @@ CREATE TABLE payment_vouchers (
     expense_id      UUID REFERENCES expense_ledgers(id),
     amount          NUMERIC(12,2) DEFAULT 0,
     mode            TEXT,
+    bank_id         UUID REFERENCES banks(id),
     narration       TEXT
 );
 

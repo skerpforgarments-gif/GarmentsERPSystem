@@ -97,7 +97,7 @@ def get_next_doc_no(table: str, prefix: str, company_id: int, col: str = "invoic
         # To be safe in multi-user, we pull all for the company (usually small enough for ERP transactions per co)
         records = select(table, {"company_id": company_id})
         
-        full_prefix = f"{prefix}-{code}-A"
+        full_prefix = f"{prefix}{code}A"
         max_num = 0
         
         for r in records:
@@ -113,4 +113,4 @@ def get_next_doc_no(table: str, prefix: str, company_id: int, col: str = "invoic
         return f"{full_prefix}{next_num:07d}"
     except Exception as e:
         print(f"Error generating doc no: {e}")
-        return f"{prefix}-ERR-{int(time.time())}"
+        return f"{prefix}ERR{int(time.time())}"

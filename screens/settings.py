@@ -72,7 +72,7 @@ class SettingsScreen(ft.Container):
         self.create_btn = ft.ElevatedButton("Create New Business Profile", on_click=self.handle_create_company, style=AppStyles.primary_button_style(), height=45)
         
         self.company_dropdown = ft.Dropdown(label="Switch Workspace", width=400, on_change=self.select_company, **style_args)
-        self.current_company_text = ft.Text(state.current_company.get("name") if state.current_company else "No active workspace selected", size=14, color=AppColors.TEXT_SUB)
+        self.current_company_text = ft.Text(state.current_company.get("name") if state.current_company else "No active workspace selected", size=13, color=AppColors.TEXT_SUB)
 
         self.content_area.content = ft.Column([
             ft.Container(
@@ -96,7 +96,10 @@ class SettingsScreen(ft.Container):
                     ft.Divider(height=5, color=ft.colors.TRANSPARENT),
                     self.company_dropdown,
                     ft.Divider(height=10, color=ft.colors.TRANSPARENT),
-                    ft.Row([ft.Text("ACTIVE ENTITY:", weight="bold", size=12, color=AppColors.TEXT_HEADER), self.current_company_text], spacing=10)
+                    ft.Row([
+                        ft.Text("ACTIVE ENTITY:", weight="bold", size=12, color=AppColors.TEXT_HEADER), 
+                        self.current_company_text
+                    ], spacing=10, vertical_alignment=ft.CrossAxisAlignment.CENTER)
                 ], spacing=10),
                 padding=24, bgcolor=AppColors.BG_CARD, border_radius=AppStyles.RADIUS, shadow=AppStyles.CARD_SHADOW, border=ft.border.all(1, "#F0F0F0")
             )

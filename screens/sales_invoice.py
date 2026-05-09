@@ -1,5 +1,6 @@
 import flet as ft
 import uuid
+import math
 import os
 from datetime import date
 from core.state import state
@@ -160,7 +161,7 @@ class SalesInvoiceTab(ft.Column):
 
     def load_dropdowns(self):
         if not state.company_id: return
-        parties      = select("parties",      {"company_id": state.company_id})
+        parties      = select("parties",      {"company_id": state.company_id, "party_type": ["Customer", "Both"]})
         agents       = select("agents",       {"company_id": state.company_id})
         transporters = select("transporters", {"company_id": state.company_id})
         
@@ -169,7 +170,7 @@ class SalesInvoiceTab(ft.Column):
         self.trans_dd.options = [ft.dropdown.Option(key=str(t["id"]), text=t["name"]) for t in transporters]
         
         if not self.inv_no.value:
-            self.inv_no.value = f"INV-{uuid.uuid4().hex[:6].upper()}"
+            self.inv_no.value = get_next_doc_no("final_invoices", "S", state.company_id, "invoice_no")
             
         if self.page: self.update()
 
@@ -285,9 +286,9 @@ class SalesInvoiceTab(ft.Column):
             ot = float(self.other.value or 0)
             final_taxable = gross_taxable + fr + ot
             
-            rate = self._party_gst_rate
-            gst_total = final_taxable * (rate / 100)
-            roff = float(self.round_off.value or 0)
+            subtotal = final_taxable + gst_total
+            final_amt = math.ceil(subtotal)
+            roff = final_amt - subtotal
             
             self.total_pcs.value = f"Total Pcs: {int(total_pcs)}"
             self.total_amt.value = f"Base Amount: ₹{gross_taxable:,.2f}"
@@ -303,7 +304,8 @@ class SalesInvoiceTab(ft.Column):
                 self.igst_lbl.visible = False
                 self.cgst_lbl.visible = self.sgst_lbl.visible = True
                 
-            self.net_amt.value = f"Invoice Total: ₹{final_taxable + gst_total + roff:,.2f}"
+            self.round_off.value = f"{roff:.2f}"
+            self.net_amt.value = f"Invoice Total: ₹{final_amt:,.2f}"
         except Exception: pass
         if self.page: self.update()
 
@@ -324,7 +326,10 @@ class SalesInvoiceTab(ft.Column):
             final_taxable = gross_taxable + fr + ot
             rate = self._party_gst_rate
             gst_total = final_taxable * (rate / 100)
-            roff = float(self.round_off.value or 0)
+            
+            subtotal = final_taxable + gst_total
+            final_amt = math.ceil(subtotal)
+            roff = final_amt - subtotal
 
             header = {
                 "company_id":     state.company_id,
@@ -348,8 +353,8 @@ class SalesInvoiceTab(ft.Column):
                 "cgst_amount":    round(gst_total/2, 2) if self._party_tax_type != "IGST" else 0,
                 "sgst_amount":    round(gst_total/2, 2) if self._party_tax_type != "IGST" else 0,
                 "igst_amount":    round(gst_total, 2) if self._party_tax_type == "IGST" else 0,
-                "round_off":      roff,
-                "net_amount":     round(final_taxable + gst_total + roff, 2),
+                "round_off":      round(roff, 2),
+                "net_amount":     final_amt,
             }
             
             res = None
@@ -398,7 +403,19 @@ class SalesInvoiceTab(ft.Column):
             pdf_path = pdf_engine.generate_tax_invoice(header, all_items_for_pdf, company)
             print_pdf(pdf_path)
 
-            self._snack(f"✅ Tax Invoice {inv_no} saved!", "green")
+            # Update Ledger (Debit the party)
+            insert("ledger_entries", {
+                "company_id":   state.company_id,
+                "account_id":   self.party_dd.value,
+                "account_type": "Party",
+                "debit":        header["net_amount"],
+                "credit":       0,
+                "ref_id":       inv_no,
+                "ref_type":     "Sales Invoice",
+                "entry_date":   header["invoice_date"]
+            })
+
+            self._snack(f"✅ Tax Invoice {inv_no} saved and Ledger updated!", "green")
             self.clear_form()
 
         except Exception as ex:

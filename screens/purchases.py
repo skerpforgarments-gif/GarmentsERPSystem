@@ -1,9 +1,10 @@
 import flet as ft
 import uuid
+import math
 from datetime import date
 from core.state import state
 from core.theme import AppColors, AppStyles
-from database.db import select, insert
+from database.db import select, insert, update, delete, get_next_doc_no
 from components.size_matrix import sort_sizes
 from core.pdf_gen import pdf_engine, print_pdf
 import os
@@ -62,6 +63,7 @@ class PurchaseOrderTab(ft.Column):
         self.order_items        = []
         self.all_items_metadata = {}
         self.matrix_modal       = None
+        self.current_edit_id    = None
 
         # ── Header controls ───────────────────────────────────
         self.po_no      = ft.TextField(label="PO No", width=150, **AppStyles.get_input_style())
@@ -76,6 +78,13 @@ class PurchaseOrderTab(ft.Column):
         # ── Footer controls ───────────────────────────────────
         self.no_of_items_lbl = ft.Text("No. Of Items: 0", size=13, weight="w500")
         self.total_pcs    = ft.Text("Total Pcs: 0",    size=13, weight="bold")
+        
+        self.trade_disc   = ft.TextField(label="Trade %",  value="0", width=80, on_change=self.on_calc_change, **S)
+        self.td_amt_lbl   = ft.Text("Amt: ₹0.00", size=11, color=AppColors.TEXT_SUB)
+        
+        self.taxable_value = ft.Text("Taxable: ₹0.00",   size=14, weight="bold")
+        self.gst_amount    = ft.Text("GST (5%): ₹0.00",  size=13, color=AppColors.TEXT_SUB)
+        self.round_off     = ft.TextField(label="Round Off", value="0.00", width=100, on_change=self.on_calc_change, **S)
         self.gross_amount  = ft.Text("Total: ₹0.00",      size=20, weight="bold", color=AppColors.PRIMARY)
 
         # ── Scrollable items area ─────────────────────────────
@@ -138,26 +147,24 @@ class PurchaseOrderTab(ft.Column):
         return ft.Container(
             bgcolor=ft.colors.WHITE,
             padding=ft.padding.symmetric(horizontal=24, vertical=16),
-            content=ft.Row([
-                # Left side: Summary counts
-                ft.Column([
-                    self.no_of_items_lbl,
-                    self.total_pcs,
-                ], spacing=5),
-                
-                # Right side: Amount and Save
+            content=ft.Column([
                 ft.Row([
-                    self.gross_amount,
-                    ft.ElevatedButton(
-                        "Confirm & Save PO",
-                        icon=ft.icons.CHECK_CIRCLE,
-                        bgcolor=ft.colors.GREEN_600,
-                        color=ft.colors.WHITE,
-                        height=45,
-                        on_click=self.save_po
-                    )
-                ], spacing=20, alignment=ft.MainAxisAlignment.END)
-            ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN)
+                    ft.Column([self.no_of_items_lbl, self.total_pcs], spacing=2),
+                    ft.VerticalDivider(width=20),
+                    ft.Column([self.trade_disc, self.td_amt_lbl], spacing=2, horizontal_alignment=ft.CrossAxisAlignment.CENTER),
+                    ft.Container(expand=True),
+                    ft.Column([self.taxable_value, self.gst_amount], horizontal_alignment=ft.CrossAxisAlignment.END, spacing=2),
+                    self.round_off,
+                    ft.Column([
+                        self.gross_amount,
+                        ft.ElevatedButton(
+                            "Confirm & Save PO", icon=ft.icons.CHECK_CIRCLE,
+                            bgcolor=ft.colors.GREEN_600, color=ft.colors.WHITE,
+                            height=45, on_click=self.save_po
+                        )
+                    ], spacing=5, horizontal_alignment=ft.CrossAxisAlignment.END)
+                ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN, vertical_alignment=ft.CrossAxisAlignment.CENTER)
+            ])
         )
 
     # ─────────────────────────────────────────────────────────
@@ -166,12 +173,14 @@ class PurchaseOrderTab(ft.Column):
     def did_mount(self):
         if not state.company_id:
             return
-        self.po_no.value = f"PO-{uuid.uuid4().hex[:6].upper()}"
+        if not self.po_no.value:
+            self.po_no.value = get_next_doc_no("purchase_orders", "PO", state.company_id, "po_no")
         self.load_dropdowns()
-        self.add_item_row(None)
+        if not self.order_items:
+            self.add_item_row(None)
 
     def load_dropdowns(self):
-        parties = select("parties", {"company_id": state.company_id})
+        parties = select("parties", {"company_id": state.company_id, "party_type": ["Supplier", "Both"]})
         trans   = select("transporters", {"company_id": state.company_id})
         
         self.supplier_dd.options = [ft.dropdown.Option(str(p["id"]), p["name"]) for p in parties]
@@ -186,9 +195,9 @@ class PurchaseOrderTab(ft.Column):
     # Row Management
     # ─────────────────────────────────────────────────────────
     def add_item_row(self, e):
-        item_id = str(uuid.uuid4())
+        row_id = str(uuid.uuid4())
         
-        items_data = select("items", {"company_id": state.company_id})
+        items_data = select("items", {"company_id": state.company_id, "item_type": ["Supplies", "Both"]})
         for it in items_data:
             self.all_items_metadata[str(it["id"])] = it
 
@@ -203,7 +212,6 @@ class PurchaseOrderTab(ft.Column):
         qty_tf    = ft.TextField(value="0", width=100, read_only=True, **AppStyles.get_input_style())
         amt_lbl   = ft.Text("₹0.00", width=100, size=13, weight="w500")
 
-        # Hidden dict holding matrix sizes: { "M": 10, "L": 20 }
         size_qty_map = {}
 
         def _open_matrix(e):
@@ -224,7 +232,6 @@ class PurchaseOrderTab(ft.Column):
                 size_qty_map.clear()
                 size_qty_map.update(new_map)
                 
-                # Update displays
                 tot_qty = sum(new_map.values())
                 sz_str  = ", ".join(f"{s}:{q}" for s, q in new_map.items() if q > 0)
                 
@@ -257,7 +264,7 @@ class PurchaseOrderTab(ft.Column):
         )
 
         item_data = {
-            "id": item_id,
+            "id": row_id,
             "row_control": row,
             "item_dd": item_dd,
             "size_lbl": size_lbl,
@@ -283,8 +290,8 @@ class PurchaseOrderTab(ft.Column):
     # Calculations
     # ─────────────────────────────────────────────────────────
     def on_calc_change(self, e):
-        total_p = 0
-        gross   = 0
+        total_pcs = 0
+        gross_sum = 0
 
         for it in self.order_items:
             try:
@@ -292,14 +299,28 @@ class PurchaseOrderTab(ft.Column):
                 q = float(it["qty_tf"].value or 0)
                 amt = r * q
                 it["amt_lbl"].value = f"₹{amt:,.2f}"
-                total_p += q
-                gross += amt
-            except:
-                pass
+                total_pcs += q
+                gross_sum += amt
+            except: pass
 
+        # Apply Discount
+        td_p = float(self.trade_disc.value or 0)
+        td_amt = gross_sum * (td_p / 100)
+        self.td_amt_lbl.value = f"Amt: ₹{td_amt:,.2f}"
+        
+        taxable = gross_sum - td_amt
+        gst = taxable * 0.05 # Default 5% for purchases for now
+        
+        subtotal = taxable + gst
+        final_amt = math.ceil(subtotal)
+        roff = final_amt - subtotal
+        
         self.no_of_items_lbl.value = f"No. Of Items: {len([i for i in self.order_items if i['item_dd'].value])}"
-        self.total_pcs.value = f"Total Pcs: {int(total_p)}"
-        self.gross_amount.value = f"Total: ₹{gross:,.2f}"
+        self.total_pcs.value = f"Total Pcs: {int(total_pcs)}"
+        self.taxable_value.value = f"Taxable: ₹{taxable:,.2f}"
+        self.gst_amount.value = f"GST (5%): ₹{gst:,.2f}"
+        self.round_off.value = f"{roff:.2f}"
+        self.gross_amount.value = f"Total: ₹{final_amt:,.2f}"
 
         if self.page: self.update()
 
@@ -307,213 +328,139 @@ class PurchaseOrderTab(ft.Column):
     # Save Logic
     # ─────────────────────────────────────────────────────────
     def save_po(self, e):
-        if not state.company_id:
-            self.page.snack_bar = ft.SnackBar(ft.Text("Company not selected!"), bgcolor="red")
-            self.page.snack_bar.open = True
-            self.page.update()
-            return
-            
+        if not state.company_id: return
         if not self.supplier_dd.value:
-            self.page.snack_bar = ft.SnackBar(ft.Text("Please select a Supplier!"), bgcolor="red")
-            self.page.snack_bar.open = True
-            self.page.update()
+            self._snack("Please select a Supplier!", "red")
             return
 
         valid_items = []
-        gross = 0
-        total_p = 0
         for it in self.order_items:
             if not it["item_dd"].value: continue
-            
-            # Split the map into distinct rows
             for sz, q in it["size_qty_map"].items():
                 if q > 0:
-                    r = float(it["rate_tf"].value or 0)
-                    amt = r * q
-                    gross += amt
-                    total_p += q
                     valid_items.append({
                         "item_id": it["item_dd"].value,
-                        "sizes_label": sz,
+                        "size_value": sz,
                         "qty": q,
-                        "rate": r
+                        "rate": float(it["rate_tf"].value or 0)
                     })
 
         if not valid_items:
-            self.page.snack_bar = ft.SnackBar(ft.Text("No valid items with quantities to save!"), bgcolor="red")
-            self.page.snack_bar.open = True
-            self.page.update()
+            self._snack("No items to save!", "red")
             return
 
         try:
-            # 1. Insert Header
-            po_id = str(uuid.uuid4())
-            header_data = {
-                "id":             po_id,
+            po_id = self.current_edit_id or str(uuid.uuid4())
+            header = {
                 "company_id":     state.company_id,
                 "po_no":          self.po_no.value,
                 "po_date":        self.po_date.value,
                 "supplier_id":    self.supplier_dd.value,
-                "transporter_id": self.transporter_dd.value if self.transporter_dd.value else None,
+                "transporter_id": self.transporter_dd.value or None,
                 "destination":    self.destination.value,
                 "remarks":        self.remarks.value,
-                "total_pcs":      int(total_p),
-                "total_amount":   gross,
+                "total_pcs":      int(float(self.total_pcs.value.split(": ")[1])),
+                "total_amount":   float(self.gross_amount.value.replace("Total: ₹", "").replace(",", "")),
                 "status":         "Pending"
             }
-            insert("purchase_orders", header_data)
+            
+            if self.current_edit_id:
+                update("purchase_orders", header, {"id": po_id})
+                delete("purchase_order_items", {"purchase_order_id": po_id})
+            else:
+                header["id"] = po_id
+                insert("purchase_orders", header)
 
-            # 2. Insert Items
             for item in valid_items:
                 insert("purchase_order_items", {
                     "purchase_order_id": po_id,
                     "company_id":      state.company_id,
                     "item_id":         item["item_id"],
-                    "size_value":      item["sizes_label"],
+                    "size_value":      item["size_value"],
                     "rate":            item["rate"],
                     "qty_pieces":      int(item["qty"]),
                     "amount":          item["qty"] * item["rate"],
                 })
 
-            # Fetch the saved order to generate PDF
-            saved_order = select("purchase_orders", {"id": po_id})
-            if saved_order:
-                order_data = saved_order[0]
-                p_data = select("parties", {"id": order_data["supplier_id"]})
-                if p_data:
-                    order_data["party_name"] = p_data[0]["name"]
-                
-                # We need all items for PDF
-                o_items = select("purchase_order_items", {"purchase_order_id": po_id})
-                for o_it in o_items:
-                    if not o_it.get("item_name"):
-                        i_data = select("items", {"id": o_it["item_id"]})
-                        o_it["item_name"] = i_data[0]["item_name"] if i_data else "Unknown"
+            # Update Ledger (Credit the supplier)
+            insert("ledger_entries", {
+                "company_id":   state.company_id,
+                "account_id":   self.supplier_dd.value,
+                "account_type": "Party",
+                "debit":        0,
+                "credit":       header["total_amount"],
+                "ref_id":       header["po_no"],
+                "ref_type":     "Purchase Order",
+                "entry_date":   header["po_date"]
+            })
 
-                comp_data = select("companies", {"id": state.company_id})
-                company = comp_data[0] if comp_data else {}
-                
-                # Reusing the order PDF generator, but we will pass PO mode if needed.
-                # For now, generate_order is generic enough.
-                pdf_path = pdf_engine.generate_order(order_data, o_items, company)
-                print_pdf(pdf_path)
-
-            self.page.snack_bar = ft.SnackBar(ft.Text("✅ Purchase Order Saved Successfully!"), bgcolor="green")
-            self.page.snack_bar.open = True
-            self.clear_form(None)
+            self._snack("✅ Purchase Order Saved and Ledger updated!", "green")
+            self.clear_form()
 
         except Exception as ex:
-            self.page.snack_bar = ft.SnackBar(ft.Text(f"Error: {ex}"), bgcolor="red")
-            self.page.snack_bar.open = True
-            self.page.update()
+            self._snack(f"Error: {ex}", "red")
 
     def clear_form(self, e=None):
-        self.po_no.value = f"PO-{uuid.uuid4().hex[:6].upper()}"
+        self.current_edit_id = None
+        self.po_no.value = get_next_doc_no("purchase_orders", "PO", state.company_id, "po_no")
         self.supplier_dd.value = None
         self.transporter_dd.value = None
         self.destination.value = ""
         self.remarks.value = ""
         self.order_items = []
         self.items_col.controls = []
+        self.add_item_row(None)
         self.on_calc_change(None)
         if self.page: self.update()
 
-    # ─────────────────────────────────────────────────────────
-    # History Modal
-    # ─────────────────────────────────────────────────────────
+    def _snack(self, msg, color):
+        self.page.snack_bar = ft.SnackBar(ft.Text(msg), bgcolor=color)
+        self.page.snack_bar.open = True
+        self.page.update()
+
     def show_history_modal(self, e):
         orders = select("purchase_orders", {"company_id": state.company_id})
         orders.sort(key=lambda x: x.get("po_date", ""), reverse=True)
-        
-        parties = select("parties", {"company_id": state.company_id})
-        party_map = {str(p["id"]): p["name"] for p in parties}
+        parties = {str(p["id"]): p["name"] for p in select("parties", {"company_id": state.company_id})}
         
         lv = ft.ListView(expand=1, spacing=10, padding=20)
         for ord in orders:
-            p_name = party_map.get(str(ord.get("supplier_id")), "Unknown")
-            ord["party_name"] = p_name
-            
+            p_name = parties.get(str(ord.get("supplier_id")), "Unknown")
             lv.controls.append(
                 ft.Container(
-                    padding=10,
-                    bgcolor=ft.colors.WHITE,
-                    border_radius=8,
-                    border=ft.border.all(1, "#E2E8F0"),
+                    padding=10, bgcolor="white", border_radius=8, border=ft.border.all(1, "#E2E8F0"),
                     content=ft.Row([
                         ft.Column([
-                            ft.Text(f"{ord.get('po_no')}  |  {ord.get('po_date')}", weight="bold", size=14),
+                            ft.Text(f"{ord.get('po_no')} | {ord.get('po_date')}", weight="bold"),
                             ft.Text(p_name, size=12, color=AppColors.TEXT_SUB),
                         ], expand=True),
-                        ft.Text(f"Pcs: {ord.get('total_pcs', 0)}", size=12),
-                        ft.Text(f"₹ {float(ord.get('total_amount', 0)):,.2f}", size=14, weight="bold", color=AppColors.PRIMARY),
-                        ft.IconButton(ft.icons.PRINT, tooltip="Print PO", icon_color=ft.colors.BLUE_700, 
-                                      on_click=lambda e, o=ord: self.print_history_po(o))
+                        ft.Text(f"₹ {float(ord.get('total_amount', 0)):,.2f}", weight="bold"),
+                        ft.IconButton(ft.icons.PRINT, on_click=lambda e, o=ord: self.print_history_po(o))
                     ])
                 )
             )
-            
-        dlg = ft.AlertDialog(
-            title=ft.Text("Recent Purchase Orders", size=18, weight="bold"),
-            content=ft.Container(lv, width=600, height=400),
-            actions=[ft.TextButton("Close", on_click=lambda e: self.close_modal(dlg))]
-        )
-        self.page.overlay.append(dlg)
-        dlg.open = True
-        self.page.update()
-
-    def close_modal(self, dlg):
-        dlg.open = False
-        self.page.update()
-        self.page.overlay.remove(dlg)
+        dlg = ft.AlertDialog(title=ft.Text("PO History"), content=ft.Container(lv, width=600, height=400))
+        self.page.overlay.append(dlg); dlg.open = True; self.page.update()
 
     def print_history_po(self, order):
-        try:
-            items = select("purchase_order_items", {"purchase_order_id": order["id"]})
-            for o_it in items:
-                if not o_it.get("item_name"):
-                    i_data = select("items", {"id": o_it["item_id"]})
-                    o_it["item_name"] = i_data[0]["item_name"] if i_data else "Unknown"
-
-            comp_data = select("companies", {"id": state.company_id})
-            company = comp_data[0] if comp_data else {}
-            
-            # Temporary mapping for generate_order template
-            order["order_no"] = order.get("po_no")
-            order["order_date"] = order.get("po_date")
-            
-            pdf_path = pdf_engine.generate_order(order, items, company)
-            print_pdf(pdf_path)
-        except Exception as ex:
-            self.page.snack_bar = ft.SnackBar(ft.Text(f"Print Error: {ex}"), bgcolor="red")
-            self.page.snack_bar.open = True
-            self.page.update()
+        items = select("purchase_order_items", {"purchase_order_id": order["id"]})
+        for it in items:
+            i_data = select("items", {"id": it["item_id"]})
+            it["item_name"] = i_data[0]["item_name"] if i_data else "Unknown"
+        comp = select("companies", {"id": state.company_id})
+        pdf_path = pdf_engine.generate_order(order, items, comp[0] if comp else {})
+        print_pdf(pdf_path)
 
 class PurchasesScreen(ft.Container):
     def __init__(self):
         super().__init__()
         self.expand = True
         self.padding = 10
-        
-        self.tabs = ft.Tabs(
-            selected_index=0,
-            indicator_color=AppColors.PRIMARY,
-            label_color=AppColors.PRIMARY,
-            unselected_label_color=AppColors.TEXT_SUB,
-            divider_color="#F0F0F0",
-            tabs=[
-                ft.Tab(text="Purchase Orders"),
-            ]
-        )
-        
         self.po_tab = PurchaseOrderTab()
-        
         self.content = ft.Column([
-            self.tabs,
-            ft.Divider(height=10, color=ft.colors.TRANSPARENT),
+            ft.Tabs(selected_index=0, tabs=[ft.Tab(text="Purchase Orders")]),
             self.po_tab
         ], expand=True)
 
     def did_mount(self):
-        # Forward did_mount to tabs
-        if hasattr(self.po_tab, 'did_mount'):
-            self.po_tab.did_mount()
+        self.po_tab.did_mount()

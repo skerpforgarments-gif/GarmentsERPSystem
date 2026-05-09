@@ -35,6 +35,10 @@ class PartyMasterForm(ft.Stack):
 
         # --- Basic Info ---
         self.name = ft.TextField(label="Party Name *", width=280, **self.style_args)
+        self.party_type = ft.Dropdown(
+            label="Party Type", width=180, value="Both", **self.style_args,
+            options=[ft.dropdown.Option("Customer"), ft.dropdown.Option("Supplier"), ft.dropdown.Option("Both")]
+        )
         # Billing Address
         self.billing_addr1 = ft.TextField(label="Billing Address Line 1", width=280, **self.style_args)
         self.billing_addr2 = ft.TextField(label="Billing Address Line 2", width=280, **self.style_args)
@@ -206,7 +210,7 @@ class PartyMasterForm(ft.Stack):
                 spacing=0,
                 controls=[
                     section("Basic Information", [
-                        ft.Row([self.name, self.code], spacing=10, wrap=True),
+                        ft.Row([self.name, self.party_type, self.code], spacing=10, wrap=True),
                         ft.Row([self.phone, self.mobile, self.fax, self.email], spacing=10, wrap=True),
                     ]),
                     section("Billing Address", [
@@ -328,6 +332,7 @@ class PartyMasterForm(ft.Stack):
             "remarks": self.remarks.value or "",
             "is_approved": self.status_radio.value == "Approved",
             "is_blocked": self.status_radio.value == "Blocked",
+            "party_type": self.party_type.value or "Both",
         }
 
     def load_metadata(self, agents, transporters, price_lists, taxes=None):
@@ -429,6 +434,7 @@ class PartyMasterForm(ft.Stack):
         self.bank_acc.value = data.get("bank_account_no", "")
         self.bank_ifsc.value = data.get("bank_ifsc", "")
         self.remarks.value = data.get("remarks", "")
+        self.party_type.value = data.get("party_type", "Both")
         self.status_radio.value = "Blocked" if data.get("is_blocked", False) else "Approved"
         try:
             if self.page:
@@ -790,10 +796,11 @@ class MastersScreen(ft.Container):
 
         table = TableBuilder(
             [
-                {"key": "item_code", "label": "Code"},
-                {"key": "item_name", "label": "Name"},
-                {"key": "brand_name", "label": "Brand"},
-                {"key": "variety", "label": "Variety"},
+                {"key": "item_type", "label": "TYPE"},
+                {"key": "item_code", "label": "CODE"},
+                {"key": "item_name", "label": "ITEM NAME"},
+                {"key": "brand_name", "label": "BRAND"},
+                {"key": "variety", "label": "VARIETY"},
                 {"key": "style", "label": "Style"},
                 {"key": "total_stock", "label": "Opn Stock"},
                 {"key": "pcs_per_inner_box", "label": "Inner"},
@@ -941,17 +948,19 @@ class MastersScreen(ft.Container):
 
         table = TableBuilder(
             [
-                {"key": "code", "label": "Code"},
-                {"key": "name", "label": "Name"},
-                {"key": "mobile", "label": "Mobile"},
-                {"key": "phone", "label": "Phone"},
+                {"key": "party_type", "label": "TYPE"},
+                {"key": "code", "label": "CODE"},
+                {"key": "name", "label": "PARTY NAME"},
+                {"key": "agent_name", "label": "AGENT"},
+                {"key": "mobile", "label": "MOBILE"},
+                {"key": "phone", "label": "PHONE"},
                 {"key": "email", "label": "Email"},
+                {"key": "contact_person", "label": "Contact Person"},
                 {"key": "full_billing", "label": "Billing Address"},
                 {"key": "full_delivery", "label": "Delivery Address"},
                 {"key": "gstin", "label": "GSTIN"},
                 {"key": "pan_no", "label": "PAN"},
                 {"key": "cst_no", "label": "CST"},
-                {"key": "agent_name", "label": "Agent"},
                 {"key": "transporter_name", "label": "Transporter"},
                 {"key": "destination", "label": "Destination"},
                 {"key": "courier_name", "label": "Courier"},
@@ -1052,11 +1061,27 @@ class MastersScreen(ft.Container):
 
     def load_banks(self):
         self._generic_loader("banks", 
-                             [{"name": "name", "label": "Bank Name *", "required": True}, {"name": "account_no", "label": "Account No"}, {"name": "ifsc_code", "label": "IFSC"}, {"name": "branch", "label": "Branch"}],
-                             [{"key": "name", "label": "Bank Name"}, {"key": "account_no", "label": "Account No"}, {"key": "ifsc_code", "label": "IFSC"}, {"key": "branch", "label": "Branch"}], 
+                             [
+                                 {"name": "name",           "label": "Bank Name *", "required": True}, 
+                                 {"name": "account_holder", "label": "Account Holder Name"},
+                                 {"name": "account_no",     "label": "Account No"}, 
+                                 {"name": "ifsc_code",      "label": "IFSC"}, 
+                                 {"name": "branch",         "label": "Branch"},
+                                 {"name": "opening_balance","label": "Opening Balance", "type": "number", "default": "0"}
+                             ],
+                             [
+                                 {"key": "name",           "label": "Bank Name"}, 
+                                 {"key": "account_no",     "label": "Account No"}, 
+                                 {"key": "account_holder", "label": "Holder Name"},
+                                 {"key": "opening_balance","label": "Opn. Bal"},
+                                 {"key": "ifsc_code",      "label": "IFSC"}, 
+                                 {"key": "branch",         "label": "Branch"}
+                             ], 
                              self.save_bank)
     def save_bank(self, data):
         data["company_id"] = state.company_id
+        try: data["opening_balance"] = float(data.get("opening_balance") or 0)
+        except: data["opening_balance"] = 0.0
         (update("banks", data, {"id": self.edit_id}) and setattr(self, "edit_id", None)) if self.edit_id else insert("banks", data)
         self.close_modal(); self.load_banks()
 
@@ -1131,18 +1156,23 @@ class MastersScreen(ft.Container):
             [
                 {"name": "name",         "label": "Ledger Name *", "required": True},
                 {"name": "account_code",  "label": "Account Code"},
-                {"name": "ledger_type",   "label": "Type", "type": "dropdown",
-                 "options": [{"value": "Expense", "label": "Expense"},
-                             {"value": "Income",  "label": "Income"},
-                             {"value": "Asset",   "label": "Asset"},
-                             {"value": "Liability","label": "Liability"}]},
+                {"name": "group_name",    "label": "Accounting Group", "type": "dropdown", "default": "Indirect Expenses",
+                 "options": [
+                     {"value": "Indirect Expenses", "label": "Indirect Expenses (Rent, Tea, etc.)"},
+                     {"value": "Direct Expenses",   "label": "Direct Expenses (Freight, Wages)"},
+                     {"value": "Fixed Assets",      "label": "Fixed Assets (Furniture, Machinery)"},
+                     {"value": "Indirect Incomes",  "label": "Indirect Incomes (Interest, etc.)"},
+                     {"value": "Current Assets",    "label": "Current Assets (Deposits)"},
+                     {"value": "Loans & Liabilities","label": "Loans & Liabilities"}
+                 ]},
+                {"name": "hsn_sac",       "label": "HSN/SAC Code"},
                 {"name": "description",   "label": "Description"},
             ],
             [
                 {"key": "name",        "label": "Ledger Name"},
+                {"key": "group_name",  "label": "Group"},
                 {"key": "account_code","label": "Code"},
-                {"key": "ledger_type", "label": "Type"},
-                {"key": "description", "label": "Description"},
+                {"key": "hsn_sac",     "label": "HSN/SAC"},
             ],
             self.save_ledger
         )

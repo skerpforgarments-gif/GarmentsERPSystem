@@ -1,6 +1,4 @@
 import flet as ft
-
-# Core
 from core.layout import MainLayout
 from core.state import state
 from core.theme import AppColors

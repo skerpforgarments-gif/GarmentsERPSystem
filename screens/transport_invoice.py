@@ -1,5 +1,6 @@
 import flet as ft
 import uuid
+import math
 import os
 import json
 from datetime import date
@@ -48,7 +49,7 @@ class TransportInvoiceTab(ft.Column):
         self.no_cases   = ft.TextField(label="No of Cases", width=100, value="0", **S)
         self.case_no    = ft.TextField(label="Case No",    width=120, **S)
         self.weight     = ft.TextField(label="Tot Weight", width=100, value="0", **S)
-        self.charges    = ft.TextField(label="Freight",    width=100, value="0", on_change=self._calc, **S)
+        self.charges    = ft.TextField(label="Transport/Freight", width=130, value="0", on_change=self._calc, **S)
 
         # ── Footer Totals ────────────────────────────────────
         self.total_pcs   = ft.Text("Total Pcs: 0",    size=13, weight="bold")
@@ -148,7 +149,7 @@ class TransportInvoiceTab(ft.Column):
 
     def load_dropdowns(self):
         if not state.company_id: return
-        parties      = select("parties",      {"company_id": state.company_id})
+        parties      = select("parties",      {"company_id": state.company_id, "party_type": ["Customer", "Both"]})
         agents       = select("agents",       {"company_id": state.company_id})
         transporters = select("transporters", {"company_id": state.company_id})
         
@@ -235,18 +236,25 @@ class TransportInvoiceTab(ft.Column):
             gross       += float(s.get("total_amount", 0))
 
         try:
-            # Add Freight
-            freight = float(self.charges.value or 0)
-            taxable = gross + freight
+            # 1. Add only Item Amount (gross) and Transport/Freight
+            freight_val = float(self.charges.value or 0)
+            taxable = gross + freight_val
             
             gst = taxable * (self._party_gst_rate / 100)
             
+            subtotal = taxable + gst
+            # Round UP only (Increase only)
+            final_amt = math.ceil(subtotal)
+            roff = final_amt - subtotal
+            
             self.total_pcs.value   = f"Total Pcs: {int(total_pcs)}"
             self.total_boxes.value = f"Total Boxes: {int(total_boxes)}"
-            self.no_cases.value    = str(int(total_boxes))
+            self.no_cases.value    = str(math.ceil(total_boxes))
             self.taxable_val.value = f"Taxable: ₹{taxable:,.2f}"
             self.gst_lbl.value     = f"{self._party_tax_type} ({self._party_gst_rate:.0f}%): ₹{gst:,.2f}"
-            self.net_amt.value     = f"Total: ₹{taxable + gst:,.2f}"
+            self.round_off.value   = f"{roff:.2f}"
+            self.net_amt.value     = f"Total: ₹{final_amt:,.2f}"
+        except Exception: pass
         except Exception: pass
         if self.page: self.update()
 
@@ -263,9 +271,13 @@ class TransportInvoiceTab(ft.Column):
             total_boxes = sum(float(s.get("total_boxes", 0)) for s in selected_data)
             gross = sum(float(s.get("total_amount", 0)) for s in selected_data)
             
-            freight = float(self.charges.value or 0)
-            taxable = gross + freight
+            freight_val = float(self.charges.value or 0)
+            taxable = gross + freight_val
             gst = taxable * (self._party_gst_rate / 100)
+            
+            subtotal = taxable + gst
+            final_amt = math.ceil(subtotal)
+            roff = final_amt - subtotal
 
             header = {
                 "company_id":     state.company_id,
@@ -284,7 +296,7 @@ class TransportInvoiceTab(ft.Column):
                 "no_case":        int(self.no_cases.value or 0),
                 "case_no":        self.case_no.value,
                 "tot_weight":     float(self.weight.value or 0),
-                "charges":        freight,
+                "charges":        freight_val,
                 "total_pcs":      int(total_pcs),
                 "total_boxes":    round(total_boxes, 2),
                 "total_amount":   round(gross, 2),
@@ -296,8 +308,8 @@ class TransportInvoiceTab(ft.Column):
                 "tax_type":       self._party_tax_type,
                 "tax_per":        self._party_gst_rate,
                 "gst_amount":     round(gst, 2),
-                "round_off":      float(self.round_off.value or 0),
-                "net_amount":     round(taxable + gst + float(self.round_off.value or 0), 2),
+                "round_off":      round(roff, 2),
+                "net_amount":     final_amt,
                 "status":         "Unbilled"
             }
             
@@ -336,7 +348,6 @@ class TransportInvoiceTab(ft.Column):
                         "company_id":           state.company_id,
                         "transport_invoice_id": ti_id,
                         "packing_slip_id":      sid,
-                        "order_id":             it.get("order_id"),
                         "item_id":              it["item_id"],
                         "item_name":            it["item_name"],
                         "size_value":           it["size_value"],

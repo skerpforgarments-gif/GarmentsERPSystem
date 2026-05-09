@@ -58,6 +58,10 @@ class ItemMasterForm(ft.Stack):
             content=ft.Row([ft.Radio(value="Approved", label="Approved"), ft.Radio(value="Blocked", label="Blocked")], spacing=20),
             value="Approved"
         )
+        self.item_type = ft.Dropdown(
+            label="Item Type", width=160, value="Sales", **self.style_args,
+            options=[ft.dropdown.Option("Sales"), ft.dropdown.Option("Supplies"), ft.dropdown.Option("Both")]
+        )
         self.reason = ft.TextField(label="Reason/Remarks", multiline=True, min_lines=2, max_lines=3, expand=True, **self.style_args)
 
         # 4. SUB-MODAL OVERLAY UI
@@ -119,7 +123,7 @@ class ItemMasterForm(ft.Stack):
                             ft.Container(content=self.size_grid_row, border=ft.border.all(1, "#F1F5F9"), border_radius=AppStyles.BUTTON_RADIUS, bgcolor="#F8FAFC", padding=10)
                         ], spacing=4)
                     ),
-                    ft.Row([self.status_radio], spacing=20),
+                    ft.Row([self.status_radio, self.item_type], spacing=20, vertical_alignment=ft.CrossAxisAlignment.CENTER),
                     ft.Row([ft.Container(content=self.reason, expand=True)]),
                     self.size_matrix_section,
                     ft.Row([
@@ -290,6 +294,7 @@ class ItemMasterForm(ft.Stack):
             "tax_id": self.tax_dd.value,
             "is_approved": self.status_radio.value == "Approved", "is_blocked": self.status_radio.value == "Blocked",
             "reason": self.reason.value or "", "opening_stock": opening_stock,
+            "item_type": self.item_type.value or "Sales",
         }
 
     def set_values(self, data: dict):
@@ -309,6 +314,7 @@ class ItemMasterForm(ft.Stack):
         self.hsn_code.value = data.get("hsn_code", "")
         if data.get("tax_id"):
             self.tax_dd.value = str(data["tax_id"])
+        self.item_type.value = data.get("item_type", "Sales")
         self.status_radio.value = "Blocked" if data.get("is_blocked", False) else "Approved"
         self.reason.value = data.get("reason", "")
         for cb in self.size_checkboxes.values(): cb.value = False
