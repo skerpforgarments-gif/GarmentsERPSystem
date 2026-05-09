@@ -5,20 +5,32 @@ from core.theme import AppColors, AppStyles
 from database.db import select
 from components.table import TableBuilder
 
-REPORT_OPTIONS = [
-    "1. Sales Details",
-    "2. Party-wise Sales",
-    "3. Item-wise Sales",
-    "4. Agent-wise Sales (with Commission)",
-    "5. Party Ledger",
-    "6. Party-wise Outstanding",
-    "7. Agent Ledger",
-    "8. Agent-wise Outstanding",
-    "9. Expense Ledger",
-    "10. Expense Ledger Outstanding",
-    "11. Purchase Order Details",
-    "12. Cheque Issue Details"
-]
+# ── Report Categories & Structure ──────────────────────
+REPORT_CATEGORIES = {
+    "Sales Analytics": [
+        "Sales Details",
+        "Party-wise Sales",
+        "Item-wise Sales"
+    ],
+    "Agent Performance": [
+        "Agent-wise Sales",
+        "Agent Ledger",
+        "Agent Outstanding"
+    ],
+    "Financial Ledgers": [
+        "Party Ledger",
+        "Party Outstanding",
+        "Expense Ledger",
+        "Expense Outstanding"
+    ],
+    "Registers": [
+        "Purchase Order Details",
+        "Cheque Issue Details"
+    ],
+    "Inventory": [
+        "Stock Ledger"
+    ]
+}
 
 class ReportsScreen(ft.Container):
     def __init__(self):
@@ -26,48 +38,88 @@ class ReportsScreen(ft.Container):
         self.expand = True
         self.padding = 20
 
-        self.tabs = ft.Tabs(
-            selected_index=0,
-            on_change=self.on_tab_change,
-            indicator_color=AppColors.PRIMARY,
-            label_color=AppColors.PRIMARY,
-            unselected_label_color=AppColors.TEXT_SUB,
-            divider_color="#F0F0F0",
-            tabs=[
-                ft.Tab(text="Analytics Dashboard"),
-                ft.Tab(text="Central Report Viewer"),
-            ],
-        )
-
-        self.content_area = ft.Container(expand=True)
-
-        self.content = ft.Column(
-            controls=[
+        # Current State
+        self.current_report = "Sales Details"
+        
+        # ── Header ──────────────────────────────────────────
+        self.header = ft.Container(
+            content=ft.Row([
                 ft.Text("Business Intelligence & Reports", size=AppStyles.H1_SIZE, weight="bold", color=AppColors.TEXT_HEADER),
-                ft.Divider(height=10, color=ft.colors.TRANSPARENT),
-                self.tabs,
-                ft.Divider(height=10, color=ft.colors.TRANSPARENT),
-                self.content_area
-            ],
-            expand=True
+                ft.ElevatedButton("Dashboard", icon=ft.icons.DASHBOARD, on_click=lambda _: self.load_analytics(), style=AppStyles.secondary_button_style())
+            ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN)
         )
+
+        # ── Sidebar Menu ────────────────────────────────────
+        self.sidebar_col = ft.Column(spacing=5, scroll=ft.ScrollMode.AUTO)
+        self._build_sidebar()
+        
+        self.sidebar = ft.Container(
+            width=250,
+            border=ft.border.only(right=ft.border.BorderSide(1, "#E2E8F0")),
+            padding=ft.padding.only(right=15),
+            content=self.sidebar_col
+        )
+
+        # ── Main Content Area ───────────────────────────────
+        self.content_area = ft.Container(expand=True, padding=ft.padding.only(left=20))
+
+        self.content = ft.Column([
+            self.header,
+            ft.Divider(height=20, color=ft.colors.TRANSPARENT),
+            ft.Row([self.sidebar, self.content_area], expand=True, alignment=ft.MainAxisAlignment.START, vertical_alignment=ft.CrossAxisAlignment.START)
+        ], expand=True)
 
     def did_mount(self):
         self.load_analytics()
 
-    def on_tab_change(self, e):
-        if self.tabs.selected_index == 0:
-            self.load_analytics()
-        else:
-            self.load_central_viewer()
+    # =========================================================
+    # SIDEBAR BUILDER
+    # =========================================================
+    def _build_sidebar(self):
+        self.sidebar_col.controls.clear()
+        
+        for category, reports in REPORT_CATEGORIES.items():
+            self.sidebar_col.controls.append(
+                ft.Container(
+                    padding=ft.padding.only(top=10, bottom=5),
+                    content=ft.Text(category.upper(), size=11, weight="bold", color=AppColors.TEXT_SUB)
+                )
+            )
+            for report in reports:
+                is_selected = (report == self.current_report)
+                self.sidebar_col.controls.append(
+                    ft.Container(
+                        padding=ft.padding.symmetric(horizontal=12, vertical=8),
+                        border_radius=6,
+                        bgcolor=ft.colors.with_opacity(0.1, AppColors.PRIMARY) if is_selected else ft.colors.TRANSPARENT,
+                        on_click=lambda e, r=report: self.on_report_select(r),
+                        ink=True,
+                        content=ft.Text(
+                            report, 
+                            color=AppColors.PRIMARY if is_selected else AppColors.TEXT_HEADER,
+                            weight="w600" if is_selected else "normal",
+                            size=13
+                        )
+                    )
+                )
+
+    def on_report_select(self, report_name):
+        self.current_report = report_name
+        self._build_sidebar() # Rebuild to update active state
+        self.load_central_viewer()
         if self.page: self.update()
 
     # =========================================================
     # 1. ANALYTICS DASHBOARD
     # =========================================================
     def load_analytics(self):
+        # Deselect sidebar item
+        self.current_report = None
+        self._build_sidebar()
+        
         if not state.company_id:
             self.content_area.content = ft.Text("Select company first", color="red")
+            if self.page: self.update()
             return
 
         invoices = select("final_invoices", {"company_id": state.company_id})
@@ -90,6 +142,7 @@ class ReportsScreen(ft.Container):
                 ft.Container(self.build_card("Orders Left to Pack", str(pending_orders_count), ft.icons.INVENTORY, AppColors.WARNING), col={"sm": 12, "md": 4}),
             ], spacing=20)
         ])
+        if self.page: self.update()
 
     def build_card(self, title, value, icon, accent_color):
         return ft.Container(
@@ -116,50 +169,49 @@ class ReportsScreen(ft.Container):
         if not state.company_id:
             self.content_area.content = ft.Text("Select company first", color="red")
             return
+            
+        S = AppStyles.get_input_style()
 
         # Filters
-        self.report_dd = ft.Dropdown(
-            label="Select Report", 
-            options=[ft.dropdown.Option(r) for r in REPORT_OPTIONS],
-            width=300,
-            value=REPORT_OPTIONS[0],
-            on_change=self.on_report_type_change,
-            **AppStyles.get_input_style()
-        )
-        
         today = date.today()
         first_day = today.replace(day=1)
-        self.from_date = ft.TextField(label="From Date (YYYY-MM-DD)", value=first_day.isoformat(), width=180, **AppStyles.get_input_style())
-        self.to_date = ft.TextField(label="To Date (YYYY-MM-DD)", value=today.isoformat(), width=180, **AppStyles.get_input_style())
+        self.from_date = ft.TextField(label="From Date", value=first_day.isoformat(), width=150, prefix_icon=ft.icons.CALENDAR_TODAY, **S)
+        self.to_date = ft.TextField(label="To Date", value=today.isoformat(), width=150, prefix_icon=ft.icons.CALENDAR_TODAY, **S)
+        self.entity_dd = ft.Dropdown(label="Select Target", width=250, visible=False, prefix_icon=ft.icons.PERSON, **S)
         
-        self.entity_dd = ft.Dropdown(label="Select Party/Agent", width=250, visible=False, **AppStyles.get_input_style())
-        
-        self.generate_btn = ft.ElevatedButton("Generate Report", icon=ft.icons.PLAY_ARROW, bgcolor=AppColors.PRIMARY, color=ft.colors.WHITE, on_click=self.generate_report)
-        self.print_btn = ft.OutlinedButton("Print PDF", icon=ft.icons.PRINT, disabled=True)
+        self.generate_btn = ft.ElevatedButton("Generate", icon=ft.icons.PLAY_ARROW, on_click=self.generate_report, style=AppStyles.primary_button_style())
 
         self.report_container = ft.Container(expand=True)
+        self.report_header = ft.Container() # Holds the professional header text
+
+        # Setup Entity Dropdown based on selected report
+        self._setup_entity_dropdown()
+
+        # Build Filter Card
+        filter_card = ft.Container(
+            bgcolor="#F8FAFC",
+            padding=20,
+            border_radius=8,
+            border=ft.border.all(1, "#E2E8F0"),
+            content=ft.Column([
+                ft.Text(f"Filters for {self.current_report}", weight="bold", color=AppColors.TEXT_HEADER),
+                ft.Row([self.from_date, self.to_date, self.entity_dd, self.generate_btn], wrap=True, alignment=ft.MainAxisAlignment.START, spacing=15)
+            ])
+        )
 
         self.content_area.content = ft.Column([
-            ft.Container(
-                bgcolor=ft.colors.WHITE, padding=20, border_radius=8, border=ft.border.all(1, "#E2E8F0"),
-                content=ft.Row([
-                    self.report_dd, self.from_date, self.to_date, self.entity_dd,
-                    self.generate_btn, self.print_btn
-                ], wrap=True, alignment=ft.MainAxisAlignment.START, spacing=15)
-            ),
-            ft.Divider(height=10, color=ft.colors.TRANSPARENT),
+            filter_card,
+            ft.Divider(height=20, color=ft.colors.TRANSPARENT),
+            self.report_header,
             self.report_container
         ], expand=True)
-        
-        self.on_report_type_change(None)
 
-    def on_report_type_change(self, e):
-        # Show/Hide entity dropdown based on report type
-        val = self.report_dd.value
+    def _setup_entity_dropdown(self):
+        val = self.current_report
         self.entity_dd.visible = False
         self.entity_dd.options = []
         
-        if val in ["5. Party Ledger", "7. Agent Ledger", "9. Expense Ledger"]:
+        if val in ["Party Ledger", "Agent Ledger", "Expense Ledger"]:
             self.entity_dd.visible = True
             
             if "Party" in val:
@@ -174,13 +226,23 @@ class ReportsScreen(ft.Container):
                 
             self.entity_dd.options = [ft.dropdown.Option(str(d["id"]), d.get("name", d.get("ledger_name", "Unknown"))) for d in data]
 
-        if self.page: self.update()
+    def _set_report_header(self, entity_name=None):
+        title = self.current_report
+        subtitle = f"Period: {self.from_date.value} to {self.to_date.value}"
+        if entity_name:
+            title = f"{self.current_report} — {entity_name}"
+            
+        self.report_header.content = ft.Column([
+            ft.Text(title.upper(), size=16, weight="bold", color=AppColors.PRIMARY),
+            ft.Text(subtitle, size=12, color=AppColors.TEXT_SUB),
+            ft.Divider(height=10)
+        ], spacing=2)
 
     # =========================================================
     # REPORT GENERATION ENGINE
     # =========================================================
     def generate_report(self, e):
-        r_type = self.report_dd.value
+        r_type = self.current_report
         f_date = self.from_date.value
         t_date = self.to_date.value
         
@@ -188,42 +250,31 @@ class ReportsScreen(ft.Container):
         if self.page: self.update()
 
         try:
-            if r_type == "1. Sales Details":
-                self.run_sales_details(f_date, t_date)
-            elif r_type == "2. Party-wise Sales":
-                self.run_party_wise_sales(f_date, t_date)
-            elif r_type == "3. Item-wise Sales":
-                self.run_item_wise_sales(f_date, t_date)
-            elif r_type == "4. Agent-wise Sales (with Commission)":
-                self.run_agent_wise_sales(f_date, t_date)
-            elif r_type == "5. Party Ledger":
-                self.run_party_ledger(f_date, t_date)
-            elif r_type == "6. Party-wise Outstanding":
-                self.run_party_outstanding()
-            elif r_type == "7. Agent Ledger":
-                self.run_agent_ledger(f_date, t_date)
-            elif r_type == "8. Agent-wise Outstanding":
-                self.run_agent_outstanding()
-            elif r_type == "9. Expense Ledger":
-                self.run_expense_ledger(f_date, t_date)
-            elif r_type == "10. Expense Ledger Outstanding":
-                self.run_expense_outstanding()
-            elif r_type == "11. Purchase Order Details":
-                self.run_po_details(f_date, t_date)
-            elif r_type == "12. Cheque Issue Details":
-                self.run_cheque_details(f_date, t_date)
+            if r_type == "Sales Details":                   self.run_sales_details(f_date, t_date)
+            elif r_type == "Party-wise Sales":              self.run_party_wise_sales(f_date, t_date)
+            elif r_type == "Item-wise Sales":               self.run_item_wise_sales(f_date, t_date)
+            elif r_type == "Agent-wise Sales":              self.run_agent_wise_sales(f_date, t_date)
+            elif r_type == "Party Ledger":                  self.run_party_ledger(f_date, t_date)
+            elif r_type == "Party Outstanding":             self.run_party_outstanding(f_date, t_date)
+            elif r_type == "Agent Ledger":                  self.run_agent_ledger(f_date, t_date)
+            elif r_type == "Agent Outstanding":             self.run_agent_outstanding(f_date, t_date)
+            elif r_type == "Expense Ledger":                self.run_expense_ledger(f_date, t_date)
+            elif r_type == "Expense Outstanding":           self.run_expense_outstanding(f_date, t_date)
+            elif r_type == "Purchase Order Details":        self.run_po_details(f_date, t_date)
+            elif r_type == "Cheque Issue Details":          self.run_cheque_details(f_date, t_date)
+            elif r_type == "Stock Ledger":                  self.run_stock_ledger(f_date, t_date)
             else:
-                self.report_container.content = ft.Text(f"Report '{r_type}' logic under construction.", color="orange")
+                self.report_container.content = ft.Text(f"Report '{r_type}' not configured.", color="orange")
         except Exception as ex:
             self.report_container.content = ft.Text(f"Error generating report: {ex}", color="red")
             
-        self.print_btn.disabled = False
         if self.page: self.update()
 
     # =========================================================
     # INDIVIDUAL REPORT LOGIC
     # =========================================================
     def run_sales_details(self, fd, td):
+        self._set_report_header()
         invoices = select("final_invoices", {"company_id": state.company_id})
         parties = {str(p["id"]): p["name"] for p in select("parties", {"company_id": state.company_id})}
         
@@ -231,12 +282,13 @@ class ReportsScreen(ft.Container):
         for inv in invoices:
             dt = inv.get("invoice_date", "")
             if fd <= dt <= td:
+                tot_tax = float(inv.get('igst_amount', 0) or 0) + float(inv.get('cgst_amount', 0) or 0) + float(inv.get('sgst_amount', 0) or 0) + float(inv.get('tcs_amount', 0) or 0)
                 data.append({
                     "inv_no": inv.get("invoice_no"),
                     "date": dt,
                     "party": parties.get(str(inv.get("party_id")), "Unknown"),
                     "taxable": f"₹{float(inv.get('taxable_amount',0)):,.2f}",
-                    "tax": f"₹{float(inv.get('total_tax',0)):,.2f}",
+                    "tax": f"₹{tot_tax:,.2f}",
                     "net": f"₹{float(inv.get('net_amount',0)):,.2f}"
                 })
         
@@ -251,6 +303,7 @@ class ReportsScreen(ft.Container):
         self.report_container.content = TableBuilder(cols, sorted(data, key=lambda x: x["date"], reverse=True))
 
     def run_party_wise_sales(self, fd, td):
+        self._set_report_header()
         invoices = select("final_invoices", {"company_id": state.company_id})
         parties = {str(p["id"]): p["name"] for p in select("parties", {"company_id": state.company_id})}
         
@@ -265,46 +318,52 @@ class ReportsScreen(ft.Container):
                 agg[pid]["net"] += float(inv.get("net_amount", 0))
                 
         data = [{"party": v["party"], "count": str(v["count"]), "net": f"₹{v['net']:,.2f}", "_sort": v["net"]} for v in agg.values()]
-        cols = [
-            {"key": "party", "label": "Party Name"},
-            {"key": "count", "label": "No. of Invoices"},
-            {"key": "net", "label": "Total Sales Value"},
-        ]
+        cols = [{"key": "party", "label": "Party Name"}, {"key": "count", "label": "No. of Invoices"}, {"key": "net", "label": "Total Sales Value"}]
         self.report_container.content = TableBuilder(cols, sorted(data, key=lambda x: x["_sort"], reverse=True))
 
     def run_item_wise_sales(self, fd, td):
-        # We need to pull from order_items or invoice items.
-        # Since we don't have an invoice_items table explicitly tracking sizes in DB yet (saved as JSON usually),
-        # we will simulate it by querying orders and filtering by date.
+        self._set_report_header()
         orders = select("orders", {"company_id": state.company_id})
+        order_items = select("order_items", {"company_id": state.company_id})
+        items_db = {str(i["id"]): i.get("item_name", "Unknown") for i in select("items", {"company_id": state.company_id})}
+        
+        # Map order ID to date
+        order_dates = {str(o["id"]): o.get("order_date", "") for o in orders}
         
         agg = {}
-        for o in orders:
-            dt = o.get("order_date", "")
+        for o_item in order_items:
+            oid = str(o_item.get("order_id"))
+            dt = order_dates.get(oid, "")
             if fd <= dt <= td:
-                for item in o.get("items", []):
-                    iname = item.get("item_name", "Unknown")
-                    if iname not in agg: agg[iname] = {"qty": 0, "value": 0}
-                    agg[iname]["qty"] += int(item.get("qty", 0))
-                    agg[iname]["value"] += float(item.get("amount", 0))
+                item_id = str(o_item.get("item_id"))
+                iname = items_db.get(item_id, o_item.get("item_name", "Unknown"))
+                
+                if iname not in agg: agg[iname] = {"qty": 0, "value": 0}
+                agg[iname]["qty"] += int(float(o_item.get("qty_pieces", 0)))
+                agg[iname]["value"] += float(o_item.get("amount", 0))
                     
         data = [{"item": k, "qty": str(v["qty"]), "val": f"₹{v['value']:,.2f}", "_sort": v["value"]} for k, v in agg.items()]
         cols = [{"key": "item", "label": "Item Name"}, {"key": "qty", "label": "Total Pcs Sold"}, {"key": "val", "label": "Total Value"}]
         self.report_container.content = TableBuilder(cols, sorted(data, key=lambda x: x["_sort"], reverse=True))
 
     def run_agent_wise_sales(self, fd, td):
+        self._set_report_header()
         invoices = select("final_invoices", {"company_id": state.company_id})
         parties = {str(p["id"]): {"name": p["name"], "agent_id": p.get("agent_id")} for p in select("parties", {"company_id": state.company_id})}
-        agents = {str(a["id"]): {"name": a["name"], "comm": float(a.get("commission_percentage", 0))} for a in select("agents", {"company_id": state.company_id})}
+        agents = {str(a["id"]): {"name": a["name"], "comm": float(a.get("commission_percent", 0))} for a in select("agents", {"company_id": state.company_id})}
         
         agg = {}
         for inv in invoices:
             dt = inv.get("invoice_date", "")
             if fd <= dt <= td:
                 p_info = parties.get(str(inv.get("party_id")), {})
-                # Use invoice agent if available, else party agent
-                aid = str(inv.get("agent_id")) if inv.get("agent_id") else str(p_info.get("agent_id"))
-                if aid == "None": aid = None
+                
+                # Get agent from invoice or fallback to party default
+                aid = inv.get("agent_id")
+                if not aid or str(aid) == "None":
+                    aid = p_info.get("agent_id")
+                
+                aid = str(aid) if aid else None
                 
                 a_info = agents.get(aid, {"name": "Direct/No Agent", "comm": 0})
                 aname = a_info["name"]
@@ -324,73 +383,66 @@ class ReportsScreen(ft.Container):
             self.report_container.content = ft.Text("Please select a Party from the dropdown.", color="red")
             return
             
-        entries = select("ledger_entries", {"company_id": state.company_id, "party_id": pid})
+        party_name = next((opt.text for opt in self.entity_dd.options if opt.key == str(pid)), "Unknown")
+        self._set_report_header(party_name)
+            
+        # FIX: query by account_id, not party_id
+        entries = select("ledger_entries", {"company_id": state.company_id, "account_id": pid})
         data = []
         running_bal = 0
-        for e in sorted(entries, key=lambda x: x.get("created_at", "")):
+        for e in sorted(entries, key=lambda x: x.get("entry_date", "")):
             dr = float(e.get("debit", 0) or 0)
             cr = float(e.get("credit", 0) or 0)
             running_bal += (dr - cr)
             data.append({
-                "date": str(e.get("created_at", ""))[:10],
-                "type": "Invoice" if dr > 0 else "Receipt",
+                "date": str(e.get("entry_date", ""))[:10],
+                "type": f"{e.get('ref_type', 'Entry')} ({e.get('ref_id', '-')})",
                 "dr": f"₹{dr:,.2f}" if dr > 0 else "",
                 "cr": f"₹{cr:,.2f}" if cr > 0 else "",
-                "bal": f"₹{running_bal:,.2f} {'Dr' if running_bal > 0 else 'Cr'}"
+                "bal": f"₹{abs(running_bal):,.2f} {'Dr' if running_bal >= 0 else 'Cr'}"
             })
             
         cols = [{"key": "date", "label": "Date"}, {"key": "type", "label": "Type"}, {"key": "dr", "label": "Debit (+)"}, {"key": "cr", "label": "Credit (-)"}, {"key": "bal", "label": "Balance"}]
-        self.report_container.content = TableBuilder(cols, data)
+        self.report_container.content = TableBuilder(cols, data[::-1])
 
-    def run_party_outstanding(self):
+    def run_party_outstanding(self, fd, td):
+        self._set_report_header()
         ledger = select("ledger_entries", {"company_id": state.company_id})
         parties = {str(p["id"]): p["name"] for p in select("parties", {"company_id": state.company_id})}
-        invoices = select("final_invoices", {"company_id": state.company_id})
+        
+        bal = {}
+        for p_id, p_name in parties.items():
+            bal[p_id] = {"name": p_name, "debit": 0, "credit": 0}
 
-        balances = {}
         for entry in ledger:
-            pid = str(entry.get("party_id"))
-            if not entry.get("party_id") or pid not in parties: continue
-            if pid not in balances: balances[pid] = {"party_name": parties.get(pid), "debit": 0, "credit": 0}
-            balances[pid]["debit"] += float(entry.get("debit", 0) or 0)
-            balances[pid]["credit"] += float(entry.get("credit", 0) or 0)
+            dt = entry.get("entry_date", "")
+            if fd <= dt <= td:
+                pid = str(entry.get("account_id"))
+                if pid in bal:
+                    bal[pid]["debit"] += float(entry.get("debit", 0))
+                    bal[pid]["credit"] += float(entry.get("credit", 0))
 
-        # Summary rows
         summary_data = []
-        for pid, v in balances.items():
+        for pid, v in bal.items():
             net = v["debit"] - v["credit"]
             if round(net, 2) != 0:
+                side = "Dr" if net > 0 else "Cr"
                 summary_data.append({
-                    "party": v["party_name"], "dr": f"\u20b9{v['debit']:,.2f}", "cr": f"\u20b9{v['credit']:,.2f}",
-                    "net": f"\u20b9{abs(net):,.2f} {'Dr' if net > 0 else 'Cr'}", "_sort": net
+                    "party": v["name"],
+                    "debit": f"₹{v['debit']:,.2f}",
+                    "credit": f"₹{v['credit']:,.2f}",
+                    "net": f"₹{abs(net):,.2f} {side}",
+                    "_sort": abs(net)
                 })
         
-        summary_cols = [{"key": "party", "label": "Party Name"}, {"key": "dr", "label": "Total Dr"}, {"key": "cr", "label": "Total Cr"}, {"key": "net", "label": "Net Balance"}]
+        summary_cols = [{"key": "party", "label": "Party Name"}, {"key": "debit", "label": "Total Debit"}, {"key": "credit", "label": "Total Credit"}, {"key": "net", "label": "Net Balance"}]
         summary_table = TableBuilder(summary_cols, sorted(summary_data, key=lambda x: x["_sort"], reverse=True))
-
-        # Detail rows (bill-by-bill)
-        detail_data = []
-        for inv in invoices:
-            pid = str(inv.get("party_id"))
-            if pid not in parties: continue
-            net_amt = float(inv.get("net_amount", 0))
-            # Find receipts against this party
-            detail_data.append({
-                "party": parties.get(pid, "Unknown"),
-                "inv_no": inv.get("invoice_no", "-"),
-                "date": inv.get("invoice_date", "-"),
-                "inv_amt": f"\u20b9{net_amt:,.2f}",
-            })
-        
-        detail_cols = [{"key": "party", "label": "Party"}, {"key": "inv_no", "label": "Invoice No"}, {"key": "date", "label": "Date"}, {"key": "inv_amt", "label": "Invoice Amount"}]
-        detail_table = TableBuilder(detail_cols, sorted(detail_data, key=lambda x: x["date"], reverse=True))
+        summary_table.expand = False
+        summary_table.height = 300
 
         self.report_container.content = ft.Column([
-            ft.Text("Summary View", size=16, weight="bold", color=AppColors.TEXT_HEADER),
+            ft.Text("Party Balances Summary", size=14, weight="bold", color=AppColors.TEXT_HEADER),
             summary_table,
-            ft.Divider(height=20),
-            ft.Text("Detail View (Bill-by-Bill)", size=16, weight="bold", color=AppColors.TEXT_HEADER),
-            detail_table
         ], expand=True, scroll=ft.ScrollMode.AUTO)
 
     def run_agent_ledger(self, fd, td):
@@ -399,16 +451,20 @@ class ReportsScreen(ft.Container):
             self.report_container.content = ft.Text("Please select an Agent from the dropdown.", color="red")
             return
             
+        agent_name = next((opt.text for opt in self.entity_dd.options if opt.key == str(aid)), "Unknown")
+        self._set_report_header(agent_name)
+            
         invoices = select("final_invoices", {"company_id": state.company_id})
         parties = {str(p["id"]): p for p in select("parties", {"company_id": state.company_id})}
         payments = select("payment_vouchers", {"company_id": state.company_id})
-        agent_info = select("agents", {"id": aid})[0] if select("agents", {"id": aid}) else {"commission_percentage": 0}
-        comm_pct = float(agent_info.get("commission_percentage", 0))
+        agent_raw = select("agents", {"id": aid})
+        agent_info = agent_raw[0] if agent_raw else {"commission_percent": 0}
+        comm_pct = float(agent_info.get("commission_percent", 0))
 
         data = []
         running_bal = 0
         
-        # 1. Commissions Earned (from sales linked to this agent's parties)
+        # 1. Commissions Earned
         for inv in invoices:
             dt = inv.get("invoice_date", "")
             if fd <= dt <= td:
@@ -426,10 +482,11 @@ class ReportsScreen(ft.Container):
                         "bal": f"₹{running_bal:,.2f} Cr"
                     })
                     
-        # 2. Commissions Paid (from payment vouchers where account_id = agent)
-        for pv in payments:
+        # 2. Commissions Paid
+        for pv in sorted(payments, key=lambda x: x.get("voucher_date", "")):
             dt = pv.get("voucher_date", "")
-            if fd <= dt <= td and str(pv.get("account_id")) == aid:
+            # FIX: query by agent_id, not account_id
+            if fd <= dt <= td and str(pv.get("agent_id")) == aid:
                 amt = float(pv.get("amount", 0))
                 running_bal -= amt
                 data.append({
@@ -441,26 +498,38 @@ class ReportsScreen(ft.Container):
                 })
                 
         cols = [{"key": "date", "label": "Date"}, {"key": "type", "label": "Particulars"}, {"key": "dr", "label": "Paid (Dr)"}, {"key": "cr", "label": "Earned (Cr)"}, {"key": "bal", "label": "Balance"}]
-        self.report_container.content = TableBuilder(cols, sorted(data, key=lambda x: x["date"]))
+        self.report_container.content = TableBuilder(cols, sorted(data, key=lambda x: x["date"], reverse=True))
 
-    def run_agent_outstanding(self):
+    def run_agent_outstanding(self, fd, td):
+        self._set_report_header()
         invoices = select("final_invoices", {"company_id": state.company_id})
-        parties = {str(p["id"]): {"name": p["name"], "agent_id": str(p.get("agent_id"))} for p in select("parties", {"company_id": state.company_id})}
-        agents = {str(a["id"]): {"name": a["name"], "comm_pct": float(a.get("commission_percentage", 0)), "earned": 0, "paid": 0} for a in select("agents", {"company_id": state.company_id})}
+        parties = {str(p["id"]): {"name": p["name"], "agent_id": p.get("agent_id")} for p in select("parties", {"company_id": state.company_id})}
+        agents = {str(a["id"]): {"name": a["name"], "comm_pct": float(a.get("commission_percent", 0)), "earned": 0, "paid": 0} for a in select("agents", {"company_id": state.company_id})}
         payments = select("payment_vouchers", {"company_id": state.company_id})
 
         for inv in invoices:
-            pid = str(inv.get("party_id"))
-            aid = str(inv.get("agent_id")) if inv.get("agent_id") else str(parties.get(pid, {}).get("agent_id"))
-            if aid in agents:
-                agents[aid]["earned"] += float(inv.get("net_amount", 0)) * (agents[aid]["comm_pct"] / 100)
+            dt = inv.get("invoice_date", "")
+            if fd <= dt <= td:
+                pid = str(inv.get("party_id"))
+                
+                # Get agent from invoice or fallback to party default
+                aid = inv.get("agent_id")
+                if not aid or str(aid) == "None":
+                    aid = parties.get(pid, {}).get("agent_id")
+                
+                aid = str(aid) if aid else None
+                
+                if aid and aid in agents:
+                    agents[aid]["earned"] += float(inv.get("net_amount", 0)) * (agents[aid]["comm_pct"] / 100)
                 
         for pv in payments:
-            aid = str(pv.get("account_id"))
-            if aid in agents:
-                agents[aid]["paid"] += float(pv.get("amount", 0))
+            dt = pv.get("voucher_date", "")
+            if fd <= dt <= td:
+                # FIX: query by agent_id, not account_id
+                aid = str(pv.get("agent_id"))
+                if aid in agents:
+                    agents[aid]["paid"] += float(pv.get("amount", 0))
 
-        # Summary
         summary_data = []
         for v in agents.values():
             net = v["earned"] - v["paid"]
@@ -472,29 +541,39 @@ class ReportsScreen(ft.Container):
         
         summary_cols = [{"key": "agent", "label": "Agent Name"}, {"key": "earned", "label": "Total Earned (Cr)"}, {"key": "paid", "label": "Total Paid (Dr)"}, {"key": "net", "label": "Net Payable"}]
         summary_table = TableBuilder(summary_cols, sorted(summary_data, key=lambda x: x["_sort"], reverse=True))
+        summary_table.expand = False
+        summary_table.height = 250
 
-        # Detail (invoice-by-invoice)
         detail_data = []
         for inv in invoices:
-            pid = str(inv.get("party_id"))
-            p_info = parties.get(pid, {})
-            aid = str(inv.get("agent_id")) if inv.get("agent_id") else str(p_info.get("agent_id"))
-            if aid in agents:
-                net_amt = float(inv.get("net_amount", 0))
-                comm = net_amt * (agents[aid]["comm_pct"] / 100)
-                detail_data.append({
-                    "agent": agents[aid]["name"], "inv": inv.get("invoice_no", "-"),
-                    "party": p_info.get("name", "Unknown"), "amt": f"\u20b9{net_amt:,.2f}",
-                    "comm": f"\u20b9{comm:,.2f}"
-                })
+            dt = inv.get("invoice_date", "")
+            if fd <= dt <= td:
+                pid = str(inv.get("party_id"))
+                p_info = parties.get(pid, {})
+                aid = inv.get("agent_id")
+                if not aid or str(aid) == "None":
+                    aid = p_info.get("agent_id")
+                
+                aid = str(aid) if aid else None
+                
+                if aid and aid in agents:
+                    net_amt = float(inv.get("net_amount", 0))
+                    comm = net_amt * (agents[aid]["comm_pct"] / 100)
+                    detail_data.append({
+                        "agent": agents[aid]["name"], "inv": inv.get("invoice_no", "-"),
+                        "party": p_info.get("name", "Unknown"), "amt": f"₹{net_amt:,.2f}",
+                        "comm": f"₹{comm:,.2f}"
+                    })
         detail_cols = [{"key": "agent", "label": "Agent"}, {"key": "inv", "label": "Invoice"}, {"key": "party", "label": "Party"}, {"key": "amt", "label": "Sale Amt"}, {"key": "comm", "label": "Commission"}]
         detail_table = TableBuilder(detail_cols, detail_data)
+        detail_table.expand = False
+        detail_table.height = 400
 
         self.report_container.content = ft.Column([
-            ft.Text("Summary View", size=16, weight="bold", color=AppColors.TEXT_HEADER),
+            ft.Text("Summary View", size=14, weight="bold", color=AppColors.TEXT_HEADER),
             summary_table,
-            ft.Divider(height=20),
-            ft.Text("Detail View (Invoice-by-Invoice)", size=16, weight="bold", color=AppColors.TEXT_HEADER),
+            ft.Container(height=20),
+            ft.Text("Detail View (Invoice-by-Invoice)", size=14, weight="bold", color=AppColors.TEXT_HEADER),
             detail_table
         ], expand=True, scroll=ft.ScrollMode.AUTO)
 
@@ -504,8 +583,10 @@ class ReportsScreen(ft.Container):
             self.report_container.content = ft.Text("Please select an Expense Ledger from the dropdown.", color="red")
             return
             
+        expense_name = next((opt.text for opt in self.entity_dd.options if opt.key == str(eid)), "Unknown")
+        self._set_report_header(expense_name)
+            
         payments = select("payment_vouchers", {"company_id": state.company_id})
-        exp_ledgers = {str(e["id"]): e["name"] for e in select("expense_ledgers", {"company_id": state.company_id})}
         
         data = []
         running_total = 0
@@ -524,25 +605,38 @@ class ReportsScreen(ft.Container):
                     })
                 
         cols = [{"key": "date", "label": "Date"}, {"key": "voucher", "label": "Voucher No"}, {"key": "narration", "label": "Narration"}, {"key": "amount", "label": "Amount"}, {"key": "running", "label": "Running Total"}]
-        self.report_container.content = TableBuilder(cols, data)
+        self.report_container.content = TableBuilder(cols, data[::-1])
 
-    def run_expense_outstanding(self):
+    def run_expense_outstanding(self, fd, td):
+        self._set_report_header()
         payments = select("payment_vouchers", {"company_id": state.company_id})
-        exp_ledgers = {str(e["id"]): e["name"] for e in select("expense_ledgers", {"company_id": state.company_id})}
+        exp_ledgers = {str(e["id"]): e["ledger_name"] for e in select("expense_ledgers", {"company_id": state.company_id})}
         
-        totals = {}
+        agg = {eid: 0 for eid in exp_ledgers}
         for pv in payments:
-            eid = str(pv.get("expense_id"))
-            if eid in exp_ledgers:
-                if eid not in totals: totals[eid] = {"name": exp_ledgers[eid], "total": 0, "count": 0}
-                totals[eid]["total"] += float(pv.get("amount", 0))
-                totals[eid]["count"] += 1
+            dt = pv.get("voucher_date", "")
+            if fd <= dt <= td:
+                eid = str(pv.get("expense_id"))
+                if eid in agg:
+                    agg[eid] += float(pv.get("amount", 0))
                 
-        data = [{"ledger": v["name"], "count": str(v["count"]), "total": f"\u20b9{v['total']:,.2f}", "_sort": v["total"]} for v in totals.values()]
-        cols = [{"key": "ledger", "label": "Expense Ledger"}, {"key": "count", "label": "No. of Payments"}, {"key": "total", "label": "Total Spent"}]
-        self.report_container.content = TableBuilder(cols, sorted(data, key=lambda x: x["_sort"], reverse=True))
+        data = []
+        for eid, total in agg.items():
+            if total > 0:
+                data.append({"expense": exp_ledgers[eid], "total": f"₹{total:,.2f}", "_sort": total})
+        
+        cols = [{"key": "expense", "label": "Expense Category"}, {"key": "total", "label": "Total Spending"}]
+        table = TableBuilder(cols, sorted(data, key=lambda x: x["_sort"], reverse=True))
+        table.expand = False
+        table.height = 600
+
+        self.report_container.content = ft.Column([
+            ft.Text("Expense Summary", size=14, weight="bold", color=AppColors.TEXT_HEADER),
+            table
+        ], expand=True, scroll=ft.ScrollMode.AUTO)
 
     def run_po_details(self, fd, td):
+        self._set_report_header()
         pos = select("purchase_orders", {"company_id": state.company_id})
         parties = {str(p["id"]): p["name"] for p in select("parties", {"company_id": state.company_id})}
         data = []
@@ -557,14 +651,59 @@ class ReportsScreen(ft.Container):
         self.report_container.content = TableBuilder(cols, sorted(data, key=lambda x: x["date"], reverse=True))
 
     def run_cheque_details(self, fd, td):
+        self._set_report_header()
         pv = select("payment_vouchers", {"company_id": state.company_id})
         data = []
         for p in pv:
             dt = p.get("voucher_date", "")
             if fd <= dt <= td and p.get("mode", "").lower() == "cheque":
                 data.append({
-                    "vno": p.get("voucher_no"), "date": dt, "ref": p.get("ref_no", "-"),
+                    "vno": p.get("voucher_no"), "date": dt, "ref": p.get("narration", "-"), # using narration as ref
                     "amt": f"₹{float(p.get('amount', 0)):,.2f}", "narration": p.get("narration", "-")
                 })
         cols = [{"key": "vno", "label": "Voucher No"}, {"key": "date", "label": "Date"}, {"key": "ref", "label": "Cheque/Ref No"}, {"key": "amt", "label": "Amount"}, {"key": "narration", "label": "Remarks"}]
         self.report_container.content = TableBuilder(cols, sorted(data, key=lambda x: x["date"], reverse=True))
+
+    def run_stock_ledger(self, fd, td):
+        self._set_report_header()
+        stock = select('stock_ledger', {'company_id': state.company_id})
+        items_db = {str(i['id']): i['item_name'] for i in select('items', {'company_id': state.company_id})}
+        
+        inventory = {}
+        for row in stock:
+            dt = row.get('entry_date', '')
+            if fd <= dt <= td:
+                iid = str(row.get('item_id'))
+                sz = row.get('size_value', 'FS')
+                key = f'{iid}_{sz}'
+                
+                if key not in inventory:
+                    inventory[key] = {
+                        'item': items_db.get(iid, 'Unknown'),
+                        'size': sz,
+                        'in_qty': 0,
+                        'out_qty': 0,
+                        'balance': 0
+                    }
+                
+                q = int(row.get('qty', 0))
+                ttype = row.get('transaction_type', '')
+                if ttype == 'IN' or ttype == 'OPENING':
+                    inventory[key]['in_qty'] += q
+                    inventory[key]['balance'] += q
+                elif ttype == 'OUT':
+                    inventory[key]['out_qty'] += q
+                    inventory[key]['balance'] -= q
+                    
+        data = list(inventory.values())
+        data.sort(key=lambda x: x['item'])
+        
+        cols = [
+            {'key': 'item', 'label': 'Item Name'},
+            {'key': 'size', 'label': 'Size'},
+            {'key': 'in_qty', 'label': 'Total Inward'},
+            {'key': 'out_qty', 'label': 'Total Outward'},
+            {'key': 'balance', 'label': 'Closing Stock'}
+        ]
+        
+        self.report_container.content = TableBuilder(cols, data)

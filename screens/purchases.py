@@ -73,7 +73,11 @@ class PurchaseOrderTab(ft.Column):
         
         S = AppStyles.get_input_style()
         self.destination = ft.TextField(label="Destination", width=160, **S)
-        self.remarks     = ft.TextField(label="Remarks",     width=300, **S)
+        self.remarks     = ft.TextField(label="Remarks",     width=250, **S)
+        
+        # Expenses
+        self.freight_charge = ft.TextField(label="Freight", value="0", width=100, on_change=self.on_calc_change, **S)
+        self.other_charge   = ft.TextField(label="Other Charges", value="0", width=120, on_change=self.on_calc_change, **S)
 
         # ── Footer controls ───────────────────────────────────
         self.no_of_items_lbl = ft.Text("No. Of Items: 0", size=13, weight="w500")
@@ -115,13 +119,14 @@ class PurchaseOrderTab(ft.Column):
                     ft.Row([
                         ft.Text("Purchase Order Entry", size=22, weight="bold", color=AppColors.PRIMARY),
                         ft.OutlinedButton("View History", icon=ft.icons.HISTORY, on_click=self.show_history_modal, style=ft.ButtonStyle(color=AppColors.PRIMARY))
-                    ], spacing=15),
-                    ft.Row([self.po_no, self.po_date], spacing=10),
-                ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
+                    ], spacing=15, wrap=True),
+                    ft.Row([self.po_no, self.po_date], spacing=10, wrap=True),
+                ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN, wrap=True),
                 
                 # Row 2: Supplier and Logistic Info
                 ft.Row([
-                    self.supplier_dd, self.transporter_dd, self.destination, self.remarks
+                    self.supplier_dd, self.transporter_dd, self.destination, self.remarks,
+                    self.freight_charge, self.other_charge
                 ], spacing=12, wrap=True),
             ], spacing=15)
         )
@@ -145,26 +150,57 @@ class PurchaseOrderTab(ft.Column):
 
     def _build_footer(self):
         return ft.Container(
-            bgcolor=ft.colors.WHITE,
+            bgcolor="#F8FAFC",
             padding=ft.padding.symmetric(horizontal=24, vertical=16),
-            content=ft.Column([
-                ft.Row([
-                    ft.Column([self.no_of_items_lbl, self.total_pcs], spacing=2),
-                    ft.VerticalDivider(width=20),
-                    ft.Column([self.trade_disc, self.td_amt_lbl], spacing=2, horizontal_alignment=ft.CrossAxisAlignment.CENTER),
-                    ft.Container(expand=True),
-                    ft.Column([self.taxable_value, self.gst_amount], horizontal_alignment=ft.CrossAxisAlignment.END, spacing=2),
-                    self.round_off,
-                    ft.Column([
-                        self.gross_amount,
-                        ft.ElevatedButton(
-                            "Confirm & Save PO", icon=ft.icons.CHECK_CIRCLE,
-                            bgcolor=ft.colors.GREEN_600, color=ft.colors.WHITE,
-                            height=45, on_click=self.save_po
-                        )
-                    ], spacing=5, horizontal_alignment=ft.CrossAxisAlignment.END)
-                ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN, vertical_alignment=ft.CrossAxisAlignment.CENTER)
-            ])
+            border=ft.border.only(top=ft.border.BorderSide(1, "#E2E8F0")),
+            content=ft.Row([
+                # Left: Counts
+                ft.Column([
+                    self.no_of_items_lbl, 
+                    self.total_pcs
+                ], spacing=2),
+                
+                ft.VerticalDivider(width=20),
+                
+                # Center-Left: Trade Discount
+                ft.Column([
+                    self.trade_disc, 
+                    self.td_amt_lbl
+                ], spacing=2, horizontal_alignment=ft.CrossAxisAlignment.CENTER),
+                
+                ft.Container(expand=True),
+                
+                # Right: Totals and Actions
+                ft.Column([
+                    ft.Row([
+                        ft.Column([
+                            self.taxable_value, 
+                            self.gst_amount
+                        ], horizontal_alignment=ft.CrossAxisAlignment.END, spacing=2),
+                        ft.Container(width=10),
+                        ft.Column([
+                            ft.Text("Round Off", size=10, color=AppColors.TEXT_SUB),
+                            self.round_off
+                        ], spacing=2),
+                        ft.Container(width=10),
+                        ft.Column([
+                            self.gross_amount
+                        ], horizontal_alignment=ft.CrossAxisAlignment.END)
+                    ], spacing=10, vertical_alignment=ft.CrossAxisAlignment.CENTER),
+                    
+                    ft.Container(height=10),
+                    
+                    ft.ElevatedButton(
+                        "Confirm & Save Purchase Order", 
+                        icon=ft.icons.CHECK_CIRCLE,
+                        bgcolor=AppColors.SUCCESS, 
+                        color=ft.colors.WHITE,
+                        height=48, 
+                        on_click=self.save_po,
+                        style=ft.ButtonStyle(shape=ft.RoundedRectangleBorder(radius=8))
+                    )
+                ], horizontal_alignment=ft.CrossAxisAlignment.END)
+            ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN, vertical_alignment=ft.CrossAxisAlignment.CENTER)
         )
 
     # ─────────────────────────────────────────────────────────
@@ -309,9 +345,13 @@ class PurchaseOrderTab(ft.Column):
         self.td_amt_lbl.value = f"Amt: ₹{td_amt:,.2f}"
         
         taxable = gross_sum - td_amt
-        gst = taxable * 0.05 # Default 5% for purchases for now
+        gst = taxable * 0.05 
         
-        subtotal = taxable + gst
+        # Include Expenses
+        fr = float(self.freight_charge.value or 0)
+        oth = float(self.other_charge.value or 0)
+        
+        subtotal = taxable + gst + fr + oth
         final_amt = math.ceil(subtotal)
         roff = final_amt - subtotal
         
@@ -359,6 +399,8 @@ class PurchaseOrderTab(ft.Column):
                 "transporter_id": self.transporter_dd.value or None,
                 "destination":    self.destination.value,
                 "remarks":        self.remarks.value,
+                "freight":        float(self.freight_charge.value or 0),
+                "other_charges":  float(self.other_charge.value or 0),
                 "total_pcs":      int(float(self.total_pcs.value.split(": ")[1])),
                 "total_amount":   float(self.gross_amount.value.replace("Total: ₹", "").replace(",", "")),
                 "status":         "Pending"
@@ -380,6 +422,18 @@ class PurchaseOrderTab(ft.Column):
                     "rate":            item["rate"],
                     "qty_pieces":      int(item["qty"]),
                     "amount":          item["qty"] * item["rate"],
+                })
+                
+                # Update Stock Ledger (Add raw materials to inventory)
+                insert("stock_ledger", {
+                    "company_id":   state.company_id,
+                    "item_id":      item["item_id"],
+                    "size_value":   item["size_value"],
+                    "qty_in":       int(item["qty"]),
+                    "qty_out":      0,
+                    "transaction_type": "Purchase",
+                    "ref_id":       header["po_no"],
+                    "transaction_date": header["po_date"]
                 })
 
             # Update Ledger (Credit the supplier)
@@ -451,16 +505,17 @@ class PurchaseOrderTab(ft.Column):
         pdf_path = pdf_engine.generate_order(order, items, comp[0] if comp else {})
         print_pdf(pdf_path)
 
+from screens.purchase_invoice import PurchaseInvoiceTab
+
 class PurchasesScreen(ft.Container):
     def __init__(self):
         super().__init__()
         self.expand = True
         self.padding = 10
         self.po_tab = PurchaseOrderTab()
-        self.content = ft.Column([
-            ft.Tabs(selected_index=0, tabs=[ft.Tab(text="Purchase Orders")]),
-            self.po_tab
-        ], expand=True)
+        
+        # Directly use po_tab as content to ensure proper expansion
+        self.content = self.po_tab
 
     def did_mount(self):
         self.po_tab.did_mount()

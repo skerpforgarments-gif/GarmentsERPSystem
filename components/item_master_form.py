@@ -88,7 +88,7 @@ class ItemMasterForm(ft.Stack):
 
         self.size_matrix_section = ft.Container(
             content=ft.Column([
-                ft.Text("STOCK DETAILS", weight="bold", size=10, color=AppColors.PRIMARY, style=ft.TextStyle(letter_spacing=1.0)),
+                ft.Text("SELECTED SIZES", weight="bold", size=10, color=AppColors.PRIMARY, style=ft.TextStyle(letter_spacing=1.0)),
                 self.size_matrix_grid
             ], spacing=8),
             visible=False, padding=15, border=ft.border.all(1, "#F1F5F9"), border_radius=AppStyles.RADIUS, bgcolor="#F8FAFC"
@@ -274,7 +274,7 @@ class ItemMasterForm(ft.Stack):
         else:
             self.size_matrix_section.visible = True
             for s in selected_sizes:
-                stk_field = ft.TextField(label="Stock Qty", value=old_stocks.get(s, ""), width=100, dense=True, text_align=ft.TextAlign.CENTER, keyboard_type=ft.KeyboardType.NUMBER)
+                stk_field = ft.TextField(label="Stock Qty", value=old_stocks.get(s, ""), width=100, dense=True, text_align=ft.TextAlign.CENTER, keyboard_type=ft.KeyboardType.NUMBER, visible=False)
                 self.opening_stock_inputs[s] = stk_field
                 self.size_matrix_grid.controls.append(ft.Container(content=ft.Column([ft.Text(s, size=11, weight="bold", color=AppColors.TEXT_HEADER), stk_field], spacing=7, horizontal_alignment=ft.CrossAxisAlignment.CENTER), padding=12, bgcolor=AppColors.BG_CARD, border_radius=8, shadow=AppStyles.CARD_SHADOW, border=ft.border.all(1, "#F0F0F0")))
         try: self.update()
@@ -318,7 +318,16 @@ class ItemMasterForm(ft.Stack):
         self.status_radio.value = "Blocked" if data.get("is_blocked", False) else "Approved"
         self.reason.value = data.get("reason", "")
         for cb in self.size_checkboxes.values(): cb.value = False
-        for s in (data.get("sizes") or []):
+        
+        sizes_raw = data.get("sizes")
+        if sizes_raw is None:
+            sizes_raw = []
+        elif isinstance(sizes_raw, str):
+            import json
+            try: sizes_raw = json.loads(sizes_raw)
+            except: sizes_raw = []
+            
+        for s in sizes_raw:
             if s in self.size_checkboxes: self.size_checkboxes[s].value = True
         self.rebuild_size_matrix()
         stock_data = data.get("opening_stock", {})

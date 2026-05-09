@@ -602,6 +602,59 @@ CREATE TABLE purchase_order_items (
 );
 
 -- =========================================================
+-- 9B. PROCUREMENT (PURCHASE INVOICES)
+-- =========================================================
+CREATE TABLE purchase_invoices (
+    id                  UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    company_id          UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+    purchase_order_id   UUID REFERENCES purchase_orders(id),
+    invoice_no          TEXT NOT NULL,
+    invoice_date        DATE NOT NULL DEFAULT CURRENT_DATE,
+    supplier_id         UUID NOT NULL REFERENCES parties(id),
+    destination         TEXT,
+    transporter_id      UUID REFERENCES transporters(id),
+    remarks             TEXT,
+    total_pcs           INTEGER DEFAULT 0,
+    taxable_amount      NUMERIC(12,2) DEFAULT 0,
+    cgst_amount         NUMERIC(12,2) DEFAULT 0,
+    sgst_amount         NUMERIC(12,2) DEFAULT 0,
+    igst_amount         NUMERIC(12,2) DEFAULT 0,
+    round_off           NUMERIC(10,2) DEFAULT 0,
+    net_amount          NUMERIC(12,2) DEFAULT 0,
+    status              TEXT DEFAULT 'Billed',
+    created_at          TIMESTAMP DEFAULT now()
+);
+
+CREATE TABLE purchase_invoice_items (
+    id                  UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    company_id          UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+    purchase_invoice_id UUID NOT NULL REFERENCES purchase_invoices(id) ON DELETE CASCADE,
+    item_id             UUID NOT NULL REFERENCES items(id),
+    item_name           TEXT,
+    size_value          TEXT NOT NULL,
+    rate                NUMERIC(10,2) DEFAULT 0,
+    qty_pieces          INTEGER DEFAULT 0,
+    amount              NUMERIC(12,2) DEFAULT 0
+);
+
+-- =========================================================
+-- 9C. INVENTORY (STOCK LEDGER)
+-- =========================================================
+CREATE TABLE stock_ledger (
+    id              UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    company_id      UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+    entry_date      DATE NOT NULL DEFAULT CURRENT_DATE,
+    item_id         UUID NOT NULL REFERENCES items(id),
+    size_value      TEXT NOT NULL,
+    transaction_type TEXT NOT NULL, -- 'IN' / 'OUT' / 'OPENING'
+    ref_type        TEXT,           -- 'Purchase Invoice' / 'Sales Invoice' / 'Manual'
+    ref_id          TEXT,
+    qty             INTEGER DEFAULT 0,
+    rate            NUMERIC(10,2) DEFAULT 0,
+    created_at      TIMESTAMP DEFAULT now()
+);
+
+-- =========================================================
 -- 10. FINANCIALS
 -- =========================================================
 CREATE TABLE receipt_vouchers (
@@ -686,6 +739,9 @@ ALTER TABLE ledger_entries ENABLE ROW LEVEL SECURITY;
 ALTER TABLE settings ENABLE ROW LEVEL SECURITY;
 ALTER TABLE purchase_orders ENABLE ROW LEVEL SECURITY;
 ALTER TABLE purchase_order_items ENABLE ROW LEVEL SECURITY;
+ALTER TABLE purchase_invoices ENABLE ROW LEVEL SECURITY;
+ALTER TABLE purchase_invoice_items ENABLE ROW LEVEL SECURITY;
+ALTER TABLE stock_ledger ENABLE ROW LEVEL SECURITY;
 
 
 -- NOTE: All ALTER TABLE migrations have been merged into the CREATE TABLE
@@ -709,7 +765,8 @@ BEGIN FOR tbl IN SELECT unnest(ARRAY[
     'transport_invoices','transport_invoice_items',
     'final_invoices','final_invoice_items',
     'receipt_vouchers','payment_vouchers','ledger_entries',
-    'settings','purchase_orders','purchase_order_items'
+    'settings','purchase_orders','purchase_order_items',
+    'purchase_invoices','purchase_invoice_items','stock_ledger'
 ]) LOOP
     EXECUTE format('
         CREATE POLICY "saas_all_%s" ON %I

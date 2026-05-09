@@ -243,8 +243,11 @@ class SettingsScreen(ft.Container):
                 except:
                     export_data[t] = []
                 
+            backup_dir = os.path.join(os.getcwd(), "backups")
+            os.makedirs(backup_dir, exist_ok=True)
+            
             filename = f"backup_{date.today().isoformat()}.json"
-            filepath = os.path.join(os.getcwd(), filename)
+            filepath = os.path.join(backup_dir, filename)
             with open(filepath, "w", encoding="utf-8") as f:
                 json.dump(export_data, f, default=str, ensure_ascii=False, indent=2)
                 
@@ -254,9 +257,23 @@ class SettingsScreen(ft.Container):
         if self.page: self.update()
 
     def do_restore(self, e):
-        backup_path = os.path.join(os.getcwd(), "backup.json")
-        if not os.path.exists(backup_path):
-            self.status_msg.value = "❌ No 'backup.json' found in the application root folder. Please copy your backup file there and rename it to 'backup.json'."
+        import glob
+        import os
+        backup_dir = os.path.join(os.getcwd(), "backups")
+        
+        # Try to find the most recent backup_* file automatically in the backups folder
+        backup_files = glob.glob(os.path.join(backup_dir, "backup_*.json"))
+        
+        # Fallback to root directory in case user has legacy backups there
+        if not backup_files:
+            backup_files = glob.glob(os.path.join(os.getcwd(), "backup_*.json"))
+            
+        if backup_files:
+            # Sort by modification time to get the latest
+            backup_files.sort(key=os.path.getmtime, reverse=True)
+            backup_path = backup_files[0]
+        else:
+            self.status_msg.value = "❌ No backup file found. Please ensure a file starting with 'backup' is in the 'backups' folder."
             if self.page: self.update()
             return
             
@@ -295,26 +312,31 @@ class SettingsScreen(ft.Container):
             ledger = select("ledger_entries", {"company_id": state.company_id})
             balances = {}
             for entry in ledger:
-                pid = str(entry.get("party_id"))
-                if not entry.get("party_id"): continue
-                if pid not in balances: balances[pid] = {"debit": 0, "credit": 0}
-                balances[pid]["debit"] += float(entry.get("debit", 0) or 0)
-                balances[pid]["credit"] += float(entry.get("credit", 0) or 0)
+                # Need to group by account_id AND account_type
+                acc_id = str(entry.get("account_id"))
+                acc_type = entry.get("account_type", "Party")
+                if not entry.get("account_id"): continue
+                
+                key = f"{acc_type}_{acc_id}"
+                if key not in balances: balances[key] = {"id": acc_id, "type": acc_type, "debit": 0, "credit": 0}
+                balances[key]["debit"] += float(entry.get("debit", 0) or 0)
+                balances[key]["credit"] += float(entry.get("credit", 0) or 0)
                 
             next_yr = date.today().year if date.today().month > 3 else date.today().year - 1
             op_date = f"{next_yr}-04-01"
             
             count = 0
-            for pid, v in balances.items():
+            for key, v in balances.items():
                 net = v["debit"] - v["credit"]
                 if round(net, 2) != 0:
                     insert("ledger_entries", {
                         "company_id": state.company_id,
-                        "party_id": pid,
+                        "entry_date": op_date,
+                        "account_type": v["type"],
+                        "account_id": v["id"],
                         "debit": net if net > 0 else 0,
                         "credit": abs(net) if net < 0 else 0,
-                        "balance": 0, # Note: balance logic usually handled by a running sum view, keeping 0 here for raw insert
-                        "created_at": op_date + "T00:00:00Z"
+                        "narration": f"Opening Balance for Financial Year {next_yr}"
                     })
                     count += 1
                     

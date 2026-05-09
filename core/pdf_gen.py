@@ -42,9 +42,25 @@ def print_pdf(pdf_path):
 
 class PDFGenerator:
     def __init__(self):
-        self.output_dir = tempfile.gettempdir()
+        self.output_dir = os.path.join(os.getcwd(), "pdfs")
+        os.makedirs(self.output_dir, exist_ok=True)
+        self._cleanup_old_pdfs()
+        
         self.styles = getSampleStyleSheet()
         self._setup_custom_styles()
+
+    def _cleanup_old_pdfs(self):
+        """Silently deletes any PDF file in the pdfs folder older than 24 hours."""
+        try:
+            current_time = time.time()
+            for filename in os.listdir(self.output_dir):
+                if filename.endswith(".pdf"):
+                    filepath = os.path.join(self.output_dir, filename)
+                    # If file is older than 24 hours (86400 seconds)
+                    if os.path.isfile(filepath) and (current_time - os.path.getmtime(filepath)) > 86400:
+                        os.remove(filepath)
+        except Exception as e:
+            print(f"Cleanup error: {e}")
 
     def _setup_custom_styles(self):
         self.styles.add(ParagraphStyle(

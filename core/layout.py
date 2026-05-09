@@ -37,6 +37,7 @@ class MainLayout(ft.Row):
             ("Sales", "sales", ft.icons.SHOPPING_CART),
             ("Purchases", "purchases", ft.icons.LOCAL_SHIPPING),
             ("Finance", "finance", ft.icons.ACCOUNT_BALANCE_WALLET),
+            ("Inventory", "inventory", ft.icons.INVENTORY_2),
             ("Reports", "reports", ft.icons.BAR_CHART),
             ("Settings", "settings", ft.icons.SETTINGS),
         ]
@@ -126,6 +127,7 @@ class MainLayout(ft.Row):
             "SalesScreen": "sales",
             "PurchasesScreen": "purchases",
             "FinanceScreen": "finance",
+            "InventoryScreen": "inventory",
             "ReportsScreen": "reports",
             "SettingsScreen": "settings"
         }

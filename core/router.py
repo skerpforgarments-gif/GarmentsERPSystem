@@ -6,6 +6,7 @@ from screens.finance import FinanceScreen
 from screens.reports import ReportsScreen
 from screens.settings import SettingsScreen
 from screens.login import LoginScreen
+from screens.inventory import InventoryScreen
 
 
 class Router:
@@ -25,6 +26,7 @@ class Router:
             "sales": SalesScreen,
             "purchases": PurchasesScreen,
             "finance": FinanceScreen,
+            "inventory": InventoryScreen,
             "reports": ReportsScreen,
             "settings": SettingsScreen,
         }

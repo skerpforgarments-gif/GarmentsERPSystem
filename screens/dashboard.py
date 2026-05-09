@@ -28,9 +28,9 @@ class DashboardScreen(ft.Container):
             "Total Orders", "0", ft.icons.SHOPPING_BAG, 
             AppColors.INFO, "+5%"
         )
-        self.outstanding_card = self.build_stat_card(
-            "Account O/S", "₹0", ft.icons.ACCOUNT_BALANCE, 
-            AppColors.DANGER, "-2%"
+        self.delivered_card = self.build_stat_card(
+            "Orders Delivered", "0", ft.icons.LOCAL_SHIPPING, 
+            AppColors.SUCCESS, "+8%"
         )
 
         # Activity list (will be populated dynamically)
@@ -57,7 +57,7 @@ class DashboardScreen(ft.Container):
                     controls=[
                         ft.Container(self.sales_card, col={"sm": 12, "md": 4}),
                         ft.Container(self.orders_card, col={"sm": 12, "md": 4}),
-                        ft.Container(self.outstanding_card, col={"sm": 12, "md": 4}),
+                        ft.Container(self.delivered_card, col={"sm": 12, "md": 4}),
                     ],
                     spacing=20
                 ),
@@ -229,12 +229,12 @@ class DashboardScreen(ft.Container):
             total_orders = len(orders)
             total_sales = sum(o.get("total_amount", 0) for o in orders)
 
-            ledger = select("ledger_entries", {"company_id": state.company_id})
-            outstanding = sum(float(l.get("balance", 0) or 0) for l in ledger)
+            invoices = select("final_invoices", {"company_id": state.company_id})
+            total_delivered = len(invoices)
 
             self.sales_card.value_text.value = f"₹{round(total_sales, 2):,}"
             self.orders_card.value_text.value = str(total_orders)
-            self.outstanding_card.value_text.value = f"₹{round(outstanding, 2):,}"
+            self.delivered_card.value_text.value = str(total_delivered)
 
         except Exception as e:
             print("Dashboard stats error:", e)
