@@ -310,49 +310,125 @@ class PDFGenerator:
         info_data = [
             [f"Order No: {order_header.get('order_no')}", f"Date: {order_header.get('order_date')}"],
             [f"Party: {order_header.get('party_name')}", f"Agent: {order_header.get('agent_name', '-')}"],
-            [f"Destination: {order_header.get('destination', '-')}", f"Status: {order_header.get('status', 'Pending')}"]
+            [f"Transporter: {order_header.get('transporter_name', '-')}", f"Destination: {order_header.get('destination', '-')}"],
+            [f"Party Order: {order_header.get('party_order_no', '-')}", f"PO Date: {order_header.get('party_order_date', '-')}"],
+            [f"Total Boxes: {float(order_header.get('total_boxes', 0)):.1f}", f"Status: {order_header.get('status', 'Pending')}"]
         ]
         t = Table(info_data, colWidths=[3.5 * inch, 3.5 * inch])
         t.setStyle(TableStyle([
             ('FONTNAME', (0,0), (-1,-1), 'Helvetica'),
-            ('FONTSIZE', (0,0), (-1,-1), 10),
-            ('BOTTOMPADDING', (0,0), (-1,-1), 6),
+            ('FONTSIZE', (0,0), (-1,-1), 9),
+            ('BOTTOMPADDING', (0,0), (-1,-1), 4),
         ]))
         elements.append(t)
         elements.append(Spacer(1, 0.2 * inch))
 
         # 3. Items Table
-        data = [["Item Description", "Size", "Qty (Pcs)", "Rate", "Amount"]]
-        for it in items:
+        data = [["Sl", "Item Description", "Size", "Qty (Pcs)", "Rate", "Amount"]]
+        total_gross = 0
+        for i, it in enumerate(items, 1):
+            row_gross = float(it.get("gross_amount") or 0)
+            if not row_gross:
+                row_gross = float(it.get("qty_pieces") or 0) * float(it.get("rate") or 0)
+            
+            total_gross += row_gross
             data.append([
+                str(i),
                 str(it.get("item_name") or ""),
                 str(it.get("size_value") or ""),
                 str(it.get("qty_pieces") or 0),
                 f"{float(it.get('rate') or 0):.2f}",
-                f"{float(it.get('amount') or 0):.2f}"
+                f"{row_gross:,.2f}"
             ])
 
-        # Totals Row
-        data.append(["TOTAL", "", str(order_header.get("total_pcs") or 0), "", f"{float(order_header.get('total_amount') or 0):.2f}"])
-
-        t = Table(data, colWidths=[2.5*inch, 1*inch, 1*inch, 1*inch, 1.5*inch])
-        t.setStyle(TableStyle([
-            ('BACKGROUND', (0, 0), (-1, 0), colors.lightgrey),
-            ('TEXTCOLOR', (0, 0), (-1, 0), colors.black),
+        # zebra striping and professional table style
+        t = Table(data, colWidths=[0.4*inch, 2.5*inch, 0.8*inch, 0.8*inch, 0.8*inch, 1.2*inch])
+        table_style = [
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor("#1A237E")), # Dark Blue Header
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
             ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-            ('ALIGN', (0, 1), (0, -1), 'LEFT'),
-            ('ALIGN', (3, 1), (-1, -1), 'RIGHT'),
+            ('ALIGN', (1, 1), (1, -1), 'LEFT'), # Item name left
+            ('ALIGN', (4, 1), (-1, -1), 'RIGHT'), # Rates/Amts right
             ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-            ('FONTSIZE', (0, 0), (-1, -1), 10),
-            ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
-            ('GRID', (0, 0), (-1, -2), 1, colors.grey),
-            ('LINEBELOW', (0, -1), (-1, -1), 2, colors.black),
-            ('FONTNAME', (0, -1), (-1, -1), 'Helvetica-Bold'),
-        ]))
-        elements.append(t)
+            ('FONTSIZE', (0, 0), (-1, -1), 9),
+            ('BOTTOMPADDING', (0, 0), (-1, 0), 10),
+            ('GRID', (0, 0), (-1, -1), 0.3, colors.lightgrey),
+        ]
+        
+        # Add Zebra Striping
+        for row_idx in range(1, len(data)):
+            if row_idx % 2 == 0:
+                table_style.append(('BACKGROUND', (0, row_idx), (-1, row_idx), colors.HexColor("#F5F7FA")))
 
-        elements.append(Spacer(1, 0.5 * inch))
-        elements.append(Paragraph(f"<b>Remarks:</b> {order_header.get('remarks', '-')}", self.styles['Normal']))
+        t.setStyle(TableStyle(table_style))
+        elements.append(t)
+        elements.append(Spacer(1, 0.2 * inch))
+
+        # 4. Footer Breakdown (Discounts & Taxes)
+        taxable = float(order_header.get("total_amount") or 0)
+        gst     = float(order_header.get("vat_cst_amount") or 0)
+        roff    = float(order_header.get("round_off") or 0)
+        net     = float(order_header.get("net_amount") or 0)
+
+        # Style for labels
+        L = self.styles['Normal']
+        B = self.styles['Normal'] # We will use TableStyle for bolding
+
+        summary_data = [
+            ["", "Gross Amount:", f"Rs. {total_gross:,.2f}"],
+        ]
+        
+        discs = [
+            ("Trade Disc", "td_amount"),
+            ("Scheme Disc", "spd_amount"),
+            ("Festival Disc", "festival_amount"),
+            ("Special Disc", "scd_amount"),
+            ("Cash Disc", "cd_amount")
+        ]
+        for label, key in discs:
+            val = float(order_header.get(key) or 0)
+            if val > 0:
+                summary_data.append(["", f"{label}:", f"(-) Rs. {val:,.2f}"])
+
+        summary_data.extend([
+            ["", "Taxable Value:", f"Rs. {taxable:,.2f}"],
+            ["", f"{order_header.get('tax_type', 'GST')} Total:", f"Rs. {gst:,.2f}"],
+            ["", "Round Off:", f"{roff:.2f}"],
+            ["", "GRAND TOTAL:", f"Rs. {net:,.2f}"]
+        ])
+
+        ts = Table(summary_data, colWidths=[3.8*inch, 1.4*inch, 1.3*inch])
+        ts.setStyle(TableStyle([
+            ('ALIGN', (1,0), (-1,-1), 'RIGHT'),
+            ('FONTSIZE', (0, 0), (-1, -1), 9),
+            ('FONTNAME', (1, -4), (1, -4), 'Helvetica-Bold'), # Taxable
+            ('FONTNAME', (1, -1), (-1, -1), 'Helvetica-Bold'), # Grand Total
+            ('FONTSIZE', (1, -1), (-1, -1), 11), # Grand Total larger
+            ('LINEABOVE', (1, -4), (-1, -4), 0.5, colors.grey), # Line before taxable
+            ('LINEABOVE', (1, -1), (-1, -1), 1, colors.black), # Line before grand total
+            ('LINEBELOW', (1, -1), (-1, -1), 1, colors.black), # Line after grand total
+            ('TEXTCOLOR', (2, -1), (2, -1), colors.HexColor("#1A237E")), # Blue for net
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
+        ]))
+        elements.append(ts)
+
+        # 5. Amount in Words
+        try:
+            words = num2words(int(net), lang='en_IN').capitalize() + " Rupees Only"
+            elements.append(Spacer(1, 0.1 * inch))
+            elements.append(Paragraph(f"<b>Amount in Words:</b> {words}", self.styles['Normal']))
+        except: pass
+
+        # 6. Remarks & Signatory
+        elements.append(Spacer(1, 0.3 * inch))
+        
+        footer_data = [
+            [Paragraph(f"<b>Remarks:</b> {order_header.get('remarks', '-')}", self.styles['Normal']), 
+             Paragraph(f"For <b>{str(company_data.get('name') or 'Company')}</b><br/><br/><br/><br/>Authorised Signatory", self.styles['RightAlign'])]
+        ]
+        ftbl = Table(footer_data, colWidths=[4*inch, 3*inch])
+        ftbl.setStyle(TableStyle([('VALIGN', (0,0), (-1,-1), 'TOP')]))
+        elements.append(ftbl)
         
         doc.build(elements)
         return filepath

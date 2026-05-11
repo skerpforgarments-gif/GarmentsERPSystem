@@ -53,9 +53,25 @@ class PurchaseInvoiceTab(ft.Column):
         
         # Tax Breakup
         self.taxable_val = ft.Text("Taxable Value: ₹0.00", size=16, weight="bold")
-        self.cgst_lbl    = ft.Text("CGST (2.5%): ₹0.00", size=13, color=AppColors.TEXT_SUB)
-        self.sgst_lbl    = ft.Text("SGST (2.5%): ₹0.00", size=13, color=AppColors.TEXT_SUB)
-        self.igst_lbl    = ft.Text("IGST (5.0%): ₹0.00", size=13, color=AppColors.TEXT_SUB)
+        
+        # Detailed Tax Fields
+        self.tax_type_dd = ft.Dropdown(
+            label="Tax Type",
+            options=[ft.dropdown.Option("GST"), ft.dropdown.Option("IGST")],
+            value="GST",
+            width=120,
+            on_change=self._calc
+        )
+        self.gst_rate_tf = ft.TextField(label="GST %", value="5", width=60, on_change=self._calc, **S)
+        self.cgst_rate_tf = ft.TextField(label="CGST %", value="2.5", width=60, on_change=self._calc, **S)
+        self.cgst_amt_lbl = ft.Text("Amt: ₹0.00", size=10, color=AppColors.TEXT_SUB)
+        
+        self.sgst_rate_tf = ft.TextField(label="SGST %", value="2.5", width=60, on_change=self._calc, **S)
+        self.sgst_amt_lbl = ft.Text("Amt: ₹0.00", size=10, color=AppColors.TEXT_SUB)
+        
+        self.igst_rate_tf = ft.TextField(label="IGST %", value="5", width=60, on_change=self._calc, visible=False, **S)
+        self.igst_amt_lbl = ft.Text("Amt: ₹0.00", size=10, color=AppColors.TEXT_SUB, visible=False)
+
         self.round_off   = ft.TextField(label="Round Off", value="0.00", width=100, on_change=self._calc, **S)
         self.net_amt     = ft.Text("Invoice Total: ₹0.00", size=24, weight="bold", color=AppColors.PRIMARY)
 
@@ -131,13 +147,19 @@ class PurchaseInvoiceTab(ft.Column):
                     ], spacing=4),
                     ft.Container(expand=True),
                     ft.Column([
-                        self.cgst_lbl, self.sgst_lbl, self.igst_lbl
+                        self.taxable_val,
+                        ft.Row([
+                            self.tax_type_dd, self.gst_rate_tf,
+                            ft.VerticalDivider(width=1, color="#E2E8F0"),
+                            ft.Column([self.cgst_rate_tf, self.cgst_amt_lbl], spacing=2, horizontal_alignment=ft.CrossAxisAlignment.CENTER),
+                            ft.Column([self.sgst_rate_tf, self.sgst_amt_lbl], spacing=2, horizontal_alignment=ft.CrossAxisAlignment.CENTER),
+                            ft.Column([self.igst_rate_tf, self.igst_amt_lbl], spacing=2, horizontal_alignment=ft.CrossAxisAlignment.CENTER),
+                        ], vertical_alignment=ft.CrossAxisAlignment.CENTER),
                     ], horizontal_alignment=ft.CrossAxisAlignment.END, spacing=2),
                 ]),
                 ft.Divider(height=1, color="#E2E8F0"),
                 # Row 2: Final Totals and Actions
                 ft.Row([
-                    self.taxable_val,
                     ft.Container(expand=True),
                     ft.Row([
                         self.round_off,
@@ -151,7 +173,7 @@ class PurchaseInvoiceTab(ft.Column):
                             height=50,
                             style=AppStyles.primary_button_style(),
                         ),
-                    ], spacing=10, wrap=True)
+                    ], spacing=10, vertical_alignment=ft.CrossAxisAlignment.CENTER, wrap=True)
                 ], vertical_alignment=ft.CrossAxisAlignment.CENTER, wrap=True),
             ], spacing=15),
         )
@@ -182,8 +204,9 @@ class PurchaseInvoiceTab(ft.Column):
         pdata = select("parties", {"id": supplier_id})
         if pdata:
             p = pdata[0]
-            self._party_gst_rate = float(p.get("gst_percent", 5) or 5)
-            self._party_tax_type = p.get("tax_type", "IGST") or "IGST"
+            self.gst_rate_tf.value = str(p.get("gst_percent", 5) or 5)
+            self.tax_type_dd.value = p.get("tax_type", "GST") or "GST"
+            self._calc()
         
         self.load_invoices(supplier_id)
 
@@ -270,23 +293,68 @@ class PurchaseInvoiceTab(ft.Column):
         if self.page: self.update()
 
     def _calc(self, e=None):
-        total_pcs = gross_taxable = 0.0
+        trigger = e.control if e and hasattr(e, "control") else e if isinstance(e, ft.Control) else None
+        
         selected_data = [s for s in self._available_invoices if str(s["id"]) in self._selected_inv_ids]
-        direct_mode = state.settings.get("direct_invoice", False)
+
+        # 1. Sync CGST/SGST if GST rate changed or mode switched
+        if trigger == self.gst_rate_tf or trigger == self.tax_type_dd:
+            try:
+                val_str = str(self.gst_rate_tf.value or "").strip()
+                if val_str.endswith("."): gst_p = float(val_str + "0")
+                else: gst_p = float(val_str or 0)
+                
+                if self.tax_type_dd.value == "GST":
+                    self.cgst_rate_tf.value = f"{gst_p/2:g}"
+                    self.sgst_rate_tf.value = f"{gst_p/2:g}"
+                else:
+                    self.igst_rate_tf.value = f"{gst_p:g}"
+            except: pass
+
+        total_pcs = gross_taxable = 0.0
         
         for s in selected_data:
             total_pcs += float(s.get("total_pcs", 0))
-            if direct_mode:
+            if state.settings.get("direct_invoice", False):
                 gross_taxable += float(s.get("total_amount", 0))
             else:
-                net = float(s.get("net_amount", 0))
-                rate = float(s.get("tax_per", 5))
-                gross_taxable += net / (1 + rate/100)
+                # Base is already provided for Purchase Orders in this system
+                gross_taxable += float(s.get("total_amount", 0))
+
+        # Mandate 2025/2026 Suggestions
+        if selected_data and trigger != self.gst_rate_tf:
+             curr_val = float(self.gst_rate_tf.value or 0)
+             if curr_val == 0:
+                self.gst_rate_tf.value = "5"
+                if self.tax_type_dd.value == "GST":
+                    self.cgst_rate_tf.value = "2.5"
+                    self.sgst_rate_tf.value = "2.5"
+                else:
+                    self.igst_rate_tf.value = "5"
 
         try:
             fr = float(self.freight.value or 0)
             ot = float(self.other.value or 0)
             final_taxable = gross_taxable + fr + ot
+            
+            tax_type = str(self.tax_type_dd.value or "GST").upper()
+            c_rate = float(self.cgst_rate_tf.value or 0)
+            s_rate = float(self.sgst_rate_tf.value or 0)
+            i_rate = float(self.igst_rate_tf.value or 0)
+            
+            cgst_amt = final_taxable * (c_rate / 100) if tax_type == "GST" else 0
+            sgst_amt = final_taxable * (s_rate / 100) if tax_type == "GST" else 0
+            igst_amt = final_taxable * (i_rate / 100) if tax_type == "IGST" else 0
+            
+            self.cgst_amt_lbl.value = f"Amt: ₹{cgst_amt:,.2f}"
+            self.sgst_amt_lbl.value = f"Amt: ₹{sgst_amt:,.2f}"
+            self.igst_amt_lbl.value = f"Amt: ₹{igst_amt:,.2f}"
+            
+            self.cgst_rate_tf.visible = self.cgst_amt_lbl.visible = (tax_type == "GST")
+            self.sgst_rate_tf.visible = self.sgst_amt_lbl.visible = (tax_type == "GST")
+            self.igst_rate_tf.visible = self.igst_amt_lbl.visible = (tax_type == "IGST")
+            
+            gst_total = cgst_amt + sgst_amt + igst_amt
             
             subtotal = final_taxable + gst_total
             final_amt = math.ceil(subtotal)
@@ -296,19 +364,9 @@ class PurchaseInvoiceTab(ft.Column):
             self.total_amt.value = f"Base Amount: ₹{gross_taxable:,.2f}"
             self.taxable_val.value = f"Taxable Value: ₹{final_taxable:,.2f}"
             
-            if self._party_tax_type == "IGST":
-                self.igst_lbl.value = f"IGST ({rate:.1f}%): ₹{gst_total:,.2f}"
-                self.cgst_lbl.visible = self.sgst_lbl.visible = False
-                self.igst_lbl.visible = True
-            else:
-                self.cgst_lbl.value = f"CGST ({rate/2:.2f}%): ₹{gst_total/2:,.2f}"
-                self.sgst_lbl.value = f"SGST ({rate/2:.2f}%): ₹{gst_total/2:,.2f}"
-                self.igst_lbl.visible = False
-                self.cgst_lbl.visible = self.sgst_lbl.visible = True
-                
             self.round_off.value = f"{roff:.2f}"
             self.net_amt.value = f"Invoice Total: ₹{final_amt:,.2f}"
-        except Exception: pass
+        except Exception as ex: print(f"Calc Error: {ex}")
         if self.page: self.update()
 
     def save_invoice(self, e):

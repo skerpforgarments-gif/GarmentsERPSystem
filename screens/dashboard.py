@@ -275,15 +275,30 @@ class DashboardScreen(ft.Container):
         except Exception:
             pass 
 
-        # 3. Recent Final Invoices
+        # 3. Recent Transport Invoices
+        try:
+            recent_trans = select_recent("transport_invoices", company_filter, order_by="created_at", limit=3)
+            for t in recent_trans:
+                p_name = party_map.get(str(t.get("party_id", "")), "Unknown Party")
+                activity_items.append({
+                    "title": f"Transport Inv {t.get('invoice_no', '—')} — {p_name}",
+                    "subtitle": f"Cases: {t.get('no_case', 0)} · LR: {t.get('lr_no', '—')}",
+                    "time": t.get("created_at", ""),
+                    "icon": ft.icons.LOCAL_SHIPPING_OUTLINED,
+                    "accent": "#9333EA",
+                })
+        except Exception:
+            pass
+
+        # 4. Recent Final Invoices
         try:
             recent_invoices = select_recent("final_invoices", company_filter, order_by="created_at", limit=3)
             for inv in recent_invoices:
                 p_name = party_map.get(str(inv.get("party_id", "")), "Unknown Party")
                 amt = inv.get("net_amount") or inv.get("total_amount") or 0
                 activity_items.append({
-                    "title": f"Invoice {inv.get('invoice_no', '—')} — {p_name}",
-                    "subtitle": f"₹{float(amt):,.2f} · Sales Invoice",
+                    "title": f"Sales Invoice {inv.get('invoice_no', '—')} — {p_name}",
+                    "subtitle": f"₹{float(amt):,.2f} · Final Invoice",
                     "time": inv.get("created_at", ""),
                     "icon": ft.icons.RECEIPT_LONG_OUTLINED,
                     "accent": "#059669",
@@ -291,7 +306,37 @@ class DashboardScreen(ft.Container):
         except Exception:
             pass
 
-        # 4. Recent Vouchers (Receipts)
+        # 5. Recent Purchase Orders
+        try:
+            recent_po = select_recent("purchase_orders", company_filter, order_by="created_at", limit=3)
+            for po in recent_po:
+                p_name = party_map.get(str(po.get("supplier_id", "")), "Unknown Supplier")
+                activity_items.append({
+                    "title": f"Purchase Order {po.get('po_no', '—')} — {p_name}",
+                    "subtitle": f"₹{float(po.get('total_amount', 0)):,.2f} · Pending",
+                    "time": po.get("created_at", ""),
+                    "icon": ft.icons.SHOPPING_CART_CHECKOUT_OUTLINED,
+                    "accent": "#EA580C",
+                })
+        except Exception:
+            pass
+
+        # 6. Recent Purchase Invoices
+        try:
+            recent_pi = select_recent("purchase_invoices", company_filter, order_by="created_at", limit=3)
+            for pi in recent_pi:
+                p_name = party_map.get(str(pi.get("supplier_id", "")), "Unknown Supplier")
+                activity_items.append({
+                    "title": f"Purchase Invoice {pi.get('invoice_no', '—')} — {p_name}",
+                    "subtitle": f"₹{float(pi.get('net_amount', 0)):,.2f} · Purchase",
+                    "time": pi.get("created_at", ""),
+                    "icon": ft.icons.FACT_CHECK_OUTLINED,
+                    "accent": "#4F46E5",
+                })
+        except Exception:
+            pass
+
+        # 7. Recent Vouchers (Receipts)
         try:
             recent_receipts = select_recent("receipt_vouchers", company_filter, order_by="created_at", limit=3)
             for v in recent_receipts:

@@ -52,11 +52,65 @@ class TransportInvoiceTab(ft.Column):
         self.charges    = ft.TextField(label="Transport/Freight", width=130, value="0", on_change=self._calc, **S)
 
         # ── Footer Totals ────────────────────────────────────
+        self.no_of_items_lbl = ft.Text("No. Of Items: 0", size=13, weight="bold")
         self.total_pcs   = ft.Text("Total Pcs: 0",    size=13, weight="bold")
         self.total_boxes = ft.Text("Total Boxes: 0",  size=13, weight="bold")
         
         self.taxable_val = ft.Text("Taxable: ₹0.00", size=14, weight="bold")
-        self.gst_lbl     = ft.Text("IGST (5%): ₹0.00", size=13, color=AppColors.TEXT_SUB)
+        
+        # Detailed Tax Fields
+        self.tax_type_dd = ft.Dropdown(
+            label="Tax Type",
+            options=[ft.dropdown.Option("GST"), ft.dropdown.Option("IGST")],
+            value="GST",
+            width=120,
+            on_change=self._calc
+        )
+        self.gst_rate_tf = ft.TextField(label="GST %", value="5", width=60, on_change=self._calc, **S)
+        self.cgst_rate_tf = ft.TextField(label="CGST %", value="0", width=60, on_change=self._calc, **S)
+        self.cgst_amt_lbl = ft.Text("Amt: ₹0.00", size=10, color=AppColors.TEXT_SUB)
+        
+        self.sgst_rate_tf = ft.TextField(label="SGST %", value="0", width=60, on_change=self._calc, **S)
+        self.sgst_amt_lbl = ft.Text("Amt: ₹0.00", size=10, color=AppColors.TEXT_SUB)
+        
+        self.igst_rate_tf = ft.TextField(label="IGST %", value="0", width=60, on_change=self._calc, visible=False, **S)
+        self.igst_amt_lbl = ft.Text("Amt: ₹0.00", size=10, color=AppColors.TEXT_SUB, visible=False)
+        
+        self.cess_rate_tf = ft.TextField(label="Cess %", value="0", width=60, on_change=self._calc, **S)
+        self.cess_amt_lbl = ft.Text("Amt: ₹0.00", size=10, color=AppColors.TEXT_SUB)
+        
+        self.tcs_rate_tf = ft.TextField(label="TCS %",  value="0", width=60, on_change=self._calc, **S)
+        self.tcs_amt_lbl = ft.Text("Amt: ₹0.00", size=10, color=AppColors.TEXT_SUB)
+
+        self.trade_disc   = ft.TextField(label="Trade %",  value="0", width=80, on_change=self._calc, **S)
+        self.td_amt_lbl   = ft.Text("Amt: ₹0.00", size=11, color=AppColors.TEXT_SUB)
+        
+        self.scheme_disc  = ft.TextField(label="Scheme %", value="0", width=80, on_change=self._calc, **S)
+        self.spd_amt_lbl  = ft.Text("Amt: ₹0.00", size=11, color=AppColors.TEXT_SUB)
+        
+        self.fest_disc    = ft.TextField(label="Fest %",   value="0", width=80, on_change=self._calc, **S)
+        self.fd_amt_lbl   = ft.Text("Amt: ₹0.00", size=11, color=AppColors.TEXT_SUB)
+        
+        self.spec_disc    = ft.TextField(label="Spec %",   value="0", width=80, on_change=self._calc, **S)
+        self.scd_amt_lbl  = ft.Text("Amt: ₹0.00", size=11, color=AppColors.TEXT_SUB)
+        
+        self.cash_disc    = ft.TextField(label="Cash %",   value="0", width=80, on_change=self._calc, **S)
+        self.cd_amt_lbl   = ft.Text("Amt: ₹0.00", size=11, color=AppColors.TEXT_SUB)
+        
+        # --- Dynamic discount ordering ---
+        self.DEFAULT_DISCOUNT_ORDER = ["trade", "scheme", "festival", "scd", "cd"]
+        self.DISCOUNT_MAP = {
+            "trade":    {"field": self.trade_disc,  "amt": self.td_amt_lbl},
+            "scheme":   {"field": self.scheme_disc, "amt": self.spd_amt_lbl},
+            "festival": {"field": self.fest_disc,   "amt": self.fd_amt_lbl},
+            "scd":      {"field": self.spec_disc,   "amt": self.scd_amt_lbl},
+            "cd":       {"field": self.cash_disc,   "amt": self.cd_amt_lbl},
+        }
+        self._discount_order = list(self.DEFAULT_DISCOUNT_ORDER)
+        self.discount_row = ft.Row(spacing=15)
+        self._reorder_discount_fields()
+
+        self.gst_lbl     = ft.Text("GST: ₹0.00", size=13, color=AppColors.TEXT_SUB)
         self.round_off   = ft.TextField(label="Round Off", value="0.00", width=100, on_change=self._calc, **S)
         self.net_amt     = ft.Text("Total: ₹0.00",   size=22, weight="bold", color=AppColors.PRIMARY)
 
@@ -107,15 +161,25 @@ class TransportInvoiceTab(ft.Column):
             bgcolor="#F1F5F9",
             padding=ft.padding.symmetric(horizontal=24, vertical=8),
             content=ft.Row([
-                ft.Checkbox(on_change=self.toggle_all),
-                ft.Text("SLIP NO",   width=120, size=11, weight="bold"),
-                ft.Text("DATE",      width=100, size=11, weight="bold"),
-                ft.Text("ITEMS",     width=80,  size=11, weight="bold", text_align=ft.TextAlign.RIGHT),
-                ft.Text("PCS",       width=80,  size=11, weight="bold", text_align=ft.TextAlign.RIGHT),
-                ft.Text("BOXES",     width=80,  size=11, weight="bold", text_align=ft.TextAlign.RIGHT),
-                ft.Text("AMOUNT",    expand=True, size=11, weight="bold", text_align=ft.TextAlign.RIGHT),
+                ft.Checkbox(on_change=self.toggle_all, tooltip="Select All"),
+                ft.Text("SLIP NO",   width=120, size=11, weight="bold", color=AppColors.TEXT_SUB),
+                ft.Text("DATE",      width=100, size=11, weight="bold", color=AppColors.TEXT_SUB),
+                ft.Text("ITEMS",     width=80,  size=11, weight="bold", color=AppColors.TEXT_SUB, text_align=ft.TextAlign.RIGHT),
+                ft.Text("PCS",       width=80,  size=11, weight="bold", color=AppColors.TEXT_SUB, text_align=ft.TextAlign.RIGHT),
+                ft.Text("BOXES",     width=80,  size=11, weight="bold", color=AppColors.TEXT_SUB, text_align=ft.TextAlign.RIGHT),
+                ft.Text("AMOUNT",    expand=True, size=11, weight="bold", color=AppColors.TEXT_SUB, text_align=ft.TextAlign.RIGHT),
             ]),
         )
+
+    def _reorder_discount_fields(self):
+        self.discount_row.controls = []
+        for key in self._discount_order:
+            meta = self.DISCOUNT_MAP.get(key)
+            if meta:
+                self.discount_row.controls.append(
+                    ft.Column([meta["field"], meta["amt"]],
+                              horizontal_alignment=ft.CrossAxisAlignment.CENTER, spacing=2)
+                )
 
     def _build_footer(self):
         return ft.Container(
@@ -123,23 +187,67 @@ class TransportInvoiceTab(ft.Column):
             padding=ft.padding.symmetric(horizontal=24, vertical=16),
             border=ft.border.only(top=ft.border.BorderSide(1, "#E2E8F0")),
             content=ft.Column([
+                # Row 1: Totals and Discounts
                 ft.Row([
-                    ft.Column([self.total_pcs, self.total_boxes], spacing=4),
+                    ft.Column([
+                        self.no_of_items_lbl,
+                        ft.Row([self.total_pcs, ft.Text(" | "), self.total_boxes], spacing=10),
+                    ], spacing=5),
                     ft.Container(expand=True),
+                    self.discount_row,
                 ]),
+                
                 ft.Divider(height=1, color="#E2E8F0"),
+                
+                # Row 2: Tax Breakup and Actions
                 ft.Row([
-                    ft.Column([self.taxable_val, self.gst_lbl], spacing=2),
-                    ft.Container(expand=True),
-                    self.net_amt,
-                    ft.IconButton(ft.icons.REFRESH, on_click=lambda _: self.did_mount(), tooltip="Refresh Data"),
+                    ft.Column([
+                        self.taxable_val,
+                        ft.Row([
+                            self.tax_type_dd,
+                            self.gst_rate_tf,
+                            ft.VerticalDivider(width=1, color="#E2E8F0"),
+                            ft.Column([self.cgst_rate_tf, self.cgst_amt_lbl], spacing=2, horizontal_alignment=ft.CrossAxisAlignment.CENTER),
+                            ft.Column([self.sgst_rate_tf, self.sgst_amt_lbl], spacing=2, horizontal_alignment=ft.CrossAxisAlignment.CENTER),
+                            ft.Column([self.igst_rate_tf, self.igst_amt_lbl], spacing=2, horizontal_alignment=ft.CrossAxisAlignment.CENTER),
+                            ft.VerticalDivider(width=1, color="#E2E8F0"),
+                            ft.Column([self.cess_rate_tf, self.cess_amt_lbl], spacing=2, horizontal_alignment=ft.CrossAxisAlignment.CENTER),
+                            ft.Column([self.tcs_rate_tf,  self.tcs_amt_lbl],  spacing=2, horizontal_alignment=ft.CrossAxisAlignment.CENTER),
+                            ft.VerticalDivider(width=1, color="#E2E8F0"),
+                            self.gst_lbl,
+                        ], spacing=15, vertical_alignment=ft.CrossAxisAlignment.CENTER),
+                    ], spacing=2, expand=True),
+
+                    ft.VerticalDivider(width=1, color="#E2E8F0"),
+
+                    # Round Off Section
+                    ft.Column([
+                        self.round_off,
+                        ft.Row([
+                            ft.IconButton(ft.icons.REFRESH, on_click=lambda _: self.did_mount(), tooltip="Refresh Data", icon_size=16),
+                            ft.Text("Refresh", size=10, color=AppColors.TEXT_SUB),
+                        ], spacing=0),
+                    ], spacing=2, horizontal_alignment=ft.CrossAxisAlignment.CENTER),
+
+                    ft.Container(width=20),
+
+                    # Grand Total Section
+                    ft.Column([
+                        ft.Text("Grand Total", size=11, color=AppColors.TEXT_SUB, weight="w500"),
+                        self.net_amt,
+                    ], spacing=0, horizontal_alignment=ft.CrossAxisAlignment.END),
+
+                    ft.Container(width=10),
+
                     ft.ElevatedButton(
-                        "Generate Invoice", icon=ft.icons.RECEIPT_LONG,
-                        on_click=self.save_invoice, height=50,
+                        "Generate Invoice",
+                        icon=ft.icons.RECEIPT_LONG,
+                        on_click=self.save_invoice,
+                        height=48,
                         style=AppStyles.primary_button_style(),
                     ),
-                ]),
-            ], spacing=10),
+                ], vertical_alignment=ft.CrossAxisAlignment.CENTER),
+            ], spacing=12),
         )
 
     def did_mount(self):
@@ -172,6 +280,7 @@ class TransportInvoiceTab(ft.Column):
             if p.get("agent_id"):       self.agent_dd.value   = str(p["agent_id"])
             if p.get("transporter_id"): self.trans_dd.value   = str(p["transporter_id"])
             if p.get("price_list_id"):  self.price_list.value = str(p["price_list_id"])
+            # Initial default, but will be overridden by slip selection
             self._party_gst_rate = float(p.get("gst_percent", 5) or 5)
             self._party_tax_type = p.get("tax_type", "IGST") or "IGST"
         
@@ -180,12 +289,31 @@ class TransportInvoiceTab(ft.Column):
 
 
     def load_slips(self, party_id):
-        self._available_slips = select("packing_slips", {
+        if not party_id:
+            self._available_slips = []
+            self.rebuild_grid()
+            return
+
+        # 1. Fetch all Unbilled slips
+        slips = select("packing_slips", {
             "party_id": party_id, 
             "company_id": state.company_id,
             "status": "Unbilled"
         })
-        self._selected_slips.clear()
+        
+        # 2. If editing, also fetch slips ALREADY in this transport invoice
+        if self.current_edit_id:
+            items = select("transport_invoice_items", {"transport_invoice_id": self.current_edit_id})
+            linked_ids = [str(it["packing_slip_id"]) for it in items if it.get("packing_slip_id")]
+            if linked_ids:
+                linked_slips = select("packing_slips", {"id": linked_ids})
+                # Merge and avoid duplicates
+                existing_ids = {str(s["id"]) for s in slips}
+                for ls in linked_slips:
+                    if str(ls["id"]) not in existing_ids:
+                        slips.append(ls)
+        
+        self._available_slips = slips
         self.rebuild_grid()
 
     def toggle_all(self, e):
@@ -196,8 +324,31 @@ class TransportInvoiceTab(ft.Column):
         self.rebuild_grid()
 
     def on_slip_toggle(self, slip_id, val):
-        if val: self._selected_slips.add(slip_id)
-        else: self._selected_slips.discard(slip_id)
+        if val: 
+            if not self._selected_slips:
+                # Inherit from the first one selected
+                s = next((x for x in self._available_slips if str(x["id"]) == slip_id), None)
+                if s:
+                    self.tax_type_dd.value  = s.get("tax_type", "GST")
+                    self.trade_disc.value   = str(s.get("td_percent") or 0)
+                    self.scheme_disc.value  = str(s.get("spd_percent") or 0)
+                    self.fest_disc.value    = str(s.get("festival_percent") or 0)
+                    self.spec_disc.value    = str(s.get("scd_percent") or 0)
+                    self.cash_disc.value    = str(s.get("cd_percent") or 0)
+                    
+                    rate = float(s.get("tax_per", 5) or 5)
+                    if self.tax_type_dd.value == "IGST":
+                        self.igst_rate_tf.value = str(rate)
+                        self.cgst_rate_tf.value = "0"
+                        self.sgst_rate_tf.value = "0"
+                    else:
+                        self.cgst_rate_tf.value = str(rate/2)
+                        self.sgst_rate_tf.value = str(rate/2)
+                        self.igst_rate_tf.value = "0"
+
+            self._selected_slips.add(slip_id)
+        else: 
+            self._selected_slips.discard(slip_id)
         self._calc()
 
     def rebuild_grid(self):
@@ -227,31 +378,114 @@ class TransportInvoiceTab(ft.Column):
         if self.page: self.update()
 
     def _calc(self, e=None):
+        trigger = e.control if e and hasattr(e, "control") else e if isinstance(e, ft.Control) else None
+
+        # 1. Sync CGST/SGST if GST rate changed or mode switched
+        if trigger == self.gst_rate_tf or trigger == self.tax_type_dd:
+            try:
+                val_str = str(self.gst_rate_tf.value or "").strip()
+                if val_str.endswith("."): gst_p = float(val_str + "0")
+                else: gst_p = float(val_str or 0)
+                
+                if self.tax_type_dd.value == "GST":
+                    self.cgst_rate_tf.value = f"{gst_p/2:g}"
+                    self.sgst_rate_tf.value = f"{gst_p/2:g}"
+                else:
+                    self.igst_rate_tf.value = f"{gst_p:g}"
+            except: pass
         total_pcs = total_boxes = gross = 0.0
         selected_data = [s for s in self._available_slips if str(s["id"]) in self._selected_slips]
         
         for s in selected_data:
             total_pcs   += float(s.get("total_pcs", 0))
             total_boxes += float(s.get("total_boxes", 0))
-            gross       += float(s.get("total_amount", 0))
+            
+            # Recalculate Gross from scratch by summing items
+            items = select("packing_slip_items", {"packing_slip_id": s["id"]})
+            gross += sum(float(it.get("qty_pieces", 0)) * float(it.get("rate", 0)) for it in items)
 
         try:
-            # 1. Add only Item Amount (gross) and Transport/Freight
             freight_val = float(self.charges.value or 0)
-            taxable = gross + freight_val
             
-            gst = taxable * (self._party_gst_rate / 100)
+            # 1. Base -> Sequential Discounts = Discounted Total
+            running_total = gross
+            for key in self._discount_order:
+                meta = self.DISCOUNT_MAP.get(key)
+                if meta:
+                    try:
+                        d = float(meta["field"].value or 0)
+                        disc_amt = running_total * (d / 100)
+                        meta["amt"].value = f"Amt: ₹{disc_amt:,.2f}"
+                        running_total -= disc_amt
+                    except: pass
             
-            subtotal = taxable + gst
-            # Round UP only (Increase only)
+            # 2. Add Freight to get Taxable Base
+            taxable = running_total + freight_val
+            
+            # Breakdown tax fields
+            tax_type = self.tax_type_dd.value
+            cgst_rate = float(self.cgst_rate_tf.value or 0)
+            sgst_rate = float(self.sgst_rate_tf.value or 0)
+            igst_rate = float(self.igst_rate_tf.value or 0)
+            cess_rate = float(self.cess_rate_tf.value or 0)
+            tcs_rate  = float(self.tcs_rate_tf.value or 0)
+
+            total_gst = 0
+            if selected_data:
+                # Calculate GST on discounted taxable
+                pass
+
+            cgst_amt = taxable * (cgst_rate / 100) if tax_type == "GST" else 0
+            sgst_amt = taxable * (sgst_rate / 100) if tax_type == "GST" else 0
+            igst_amt = taxable * (igst_rate / 100) if tax_type == "IGST" else 0
+            cess_amt = taxable * (cess_rate / 100)
+            
+            # Total GST
+            gst = cgst_amt + sgst_amt + igst_amt
+            if not gst and selected_data:
+                # Fallback to inherited GST (scaled by discounts)
+                for s in selected_data:
+                    items = select("packing_slip_items", {"packing_slip_id": s["id"]})
+                    for it in items:
+                        item_amt = float(it.get("amount", 0))
+                        # Scale factor
+                        if (gross + freight_val) > 0:
+                            scale = taxable / (gross + freight_val)
+                            total_gst += (item_amt * scale) * (float(it.get("tax_percent", 5) or 5) / 100)
+                
+                # GST on freight (also scaled)
+                header_rate = float(selected_data[0].get("tax_per", 5) or 5)
+                if (gross + freight_val) > 0:
+                    scale = taxable / (gross + freight_val)
+                    total_gst += (freight_val * scale) * (header_rate / 100)
+                gst = total_gst
+
+            tcs_amt  = (taxable + gst) * (tcs_rate / 100)
+            
+            self.cgst_amt_lbl.value = f"Amt: ₹{cgst_amt:,.2f}"
+            self.sgst_amt_lbl.value = f"Amt: ₹{sgst_amt:,.2f}"
+            self.igst_amt_lbl.value = f"Amt: ₹{igst_amt:,.2f}"
+            self.cess_amt_lbl.value = f"Amt: ₹{cess_amt:,.2f}"
+            self.tcs_amt_lbl.value  = f"Amt: ₹{tcs_amt:,.2f}"
+            
+            # Visibilities
+            self.igst_rate_tf.visible = self.igst_amt_lbl.visible = (tax_type == "IGST")
+            self.cgst_rate_tf.visible = self.cgst_amt_lbl.visible = (tax_type == "GST")
+            self.sgst_rate_tf.visible = self.sgst_amt_lbl.visible = (tax_type == "GST")
+
+            gst = total_gst
+            if not gst and (cgst_amt or igst_amt):
+                 gst = cgst_amt + sgst_amt + igst_amt
+
+            subtotal = taxable + gst + cess_amt + tcs_amt
             final_amt = math.ceil(subtotal)
             roff = final_amt - subtotal
             
             self.total_pcs.value   = f"Total Pcs: {int(total_pcs)}"
-            self.total_boxes.value = f"Total Boxes: {int(total_boxes)}"
+            self.total_boxes.value = f"Total Boxes: {total_boxes:.1f}"
             self.no_cases.value    = str(math.ceil(total_boxes))
             self.taxable_val.value = f"Taxable: ₹{taxable:,.2f}"
-            self.gst_lbl.value     = f"{self._party_tax_type} ({self._party_gst_rate:.0f}%): ₹{gst:,.2f}"
+            self.gst_lbl.value     = f"{tax_type}: ₹{gst:,.2f}"
             self.round_off.value   = f"{roff:.2f}"
             self.net_amt.value     = f"Total: ₹{final_amt:,.2f}"
         except Exception: pass
@@ -263,21 +497,84 @@ class TransportInvoiceTab(ft.Column):
             self._snack("Select party and at least one slip!", "red")
             return
         
+        if not self.tax_type_dd.value:
+            self._snack("Please select a Tax Type (GST/IGST) before saving!", "red")
+            return
+        
         try:
             inv_no = self.inv_no.value or f"TI-{uuid.uuid4().hex[:6].upper()}"
             selected_data = [s for s in self._available_slips if str(s["id"]) in self._selected_slips]
             
             total_pcs = sum(float(s.get("total_pcs", 0)) for s in selected_data)
             total_boxes = sum(float(s.get("total_boxes", 0)) for s in selected_data)
-            gross = sum(float(s.get("total_amount", 0)) for s in selected_data)
+            
+            # Recalculate Gross from scratch for saving
+            gross = 0
+            for s in selected_data:
+                items = select("packing_slip_items", {"packing_slip_id": s["id"]})
+                gross += sum(float(it.get("qty_pieces", 0)) * float(it.get("rate", 0)) for it in items)
             
             freight_val = float(self.charges.value or 0)
-            taxable = gross + freight_val
-            gst = taxable * (self._party_gst_rate / 100)
+
+            # Apply Sequential Discounts to Gross ONLY (Freight excluded)
+            running_total = gross
+            discs = {}
+            for key in self._discount_order:
+                meta = self.DISCOUNT_MAP.get(key)
+                if meta:
+                    try:
+                        d = float(meta["field"].value or 0)
+                        da = running_total * (d / 100)
+                        discs[key] = {"p": d, "a": da}
+                        running_total -= da
+                    except: pass
             
-            subtotal = taxable + gst
-            final_amt = math.ceil(subtotal)
-            roff = final_amt - subtotal
+            taxable = running_total + freight_val
+            tax_type = self.tax_type_dd.value
+            cgst_rate = float(self.cgst_rate_tf.value or 0)
+            sgst_rate = float(self.sgst_rate_tf.value or 0)
+            igst_rate = float(self.igst_rate_tf.value or 0)
+            cess_rate = float(self.cess_rate_tf.value or 0)
+            tcs_rate  = float(self.tcs_rate_tf.value or 0)
+            
+            # Sequence calculation (mirrors _calc)
+            running_total = gross + freight_val
+            discs = {}
+            for key in self._discount_order:
+                meta = self.DISCOUNT_MAP.get(key)
+                if meta:
+                    d = float(meta["field"].value or 0)
+                    amt = running_total * (d / 100)
+                    discs[key] = {"p": d, "a": amt}
+                    running_total -= amt
+            
+            taxable = running_total
+            cgst_amt = taxable * (cgst_rate / 100) if tax_type == "GST" else 0
+            sgst_amt = taxable * (sgst_rate / 100) if tax_type == "GST" else 0
+            igst_amt = taxable * (igst_rate / 100) if tax_type == "IGST" else 0
+            cess_amt = taxable * (cess_rate / 100)
+            gst = cgst_amt + sgst_amt + igst_amt
+            
+            # Fallback to inherited GST
+            if not gst and selected_data:
+                total_gst = 0
+                for s in selected_data:
+                    items = select("packing_slip_items", {"packing_slip_id": s["id"]})
+                    for it in items:
+                        item_amt = float(it.get("amount", 0))
+                        if (gross + freight_val) > 0:
+                            scale = taxable / (gross + freight_val)
+                            total_gst += (item_amt * scale) * (float(it.get("tax_percent", 5) or 5) / 100)
+                
+                header_rate = float(selected_data[0].get("tax_per", 5) or 5)
+                if (gross + freight_val) > 0:
+                    scale = taxable / (gross + freight_val)
+                    total_gst += (freight_val * scale) * (header_rate / 100)
+                gst = total_gst
+
+            tcs_amt = (taxable + gst) * (tcs_rate / 100)
+            roff = float(self.round_off.value or 0)
+            net = round(taxable + gst + cess_amt + tcs_amt + roff, 0)
 
             header = {
                 "company_id":     state.company_id,
@@ -299,23 +596,36 @@ class TransportInvoiceTab(ft.Column):
                 "charges":        freight_val,
                 "total_pcs":      int(total_pcs),
                 "total_boxes":    round(total_boxes, 2),
-                "total_amount":   round(gross, 2),
-                "td_percent":     0,
-                "spd_percent":    0,
-                "festival_percent": 0,
-                "scd_percent":    0,
-                "cd_percent":     0,
-                "tax_type":       self._party_tax_type,
-                "tax_per":        self._party_gst_rate,
-                "gst_amount":     round(gst, 2),
+                "total_amount":   round(taxable, 2),
+                "td_percent":     discs.get("trade", {}).get("p", 0),
+                "td_amount":      round(discs.get("trade", {}).get("a", 0), 2),
+                "spd_percent":    discs.get("scheme", {}).get("p", 0),
+                "spd_amount":     round(discs.get("scheme", {}).get("a", 0), 2),
+                "festival_percent": discs.get("festival", {}).get("p", 0),
+                "festival_amount":  round(discs.get("festival", {}).get("a", 0), 2),
+                "scd_percent":    discs.get("scd", {}).get("p", 0),
+                "scd_amount":     round(discs.get("scd", {}).get("a", 0), 2),
+                "cd_percent":     discs.get("cd", {}).get("p", 0),
+                "cd_amount":      round(discs.get("cd", {}).get("a", 0), 2),
+                "tax_type":       tax_type,
+                "tax_per":        igst_rate if tax_type == "IGST" else cgst_rate * 2,
+                "gst_amount":     round(gst + cess_amt, 2),
+                "tcs_amount":     round(tcs_amt, 2),
                 "round_off":      round(roff, 2),
-                "net_amount":     final_amt,
+                "net_amount":     net,
                 "status":         "Unbilled"
             }
             
             res = None
             if self.current_edit_id:
                 ti_id = self.current_edit_id
+                # 1. Identify and restore previous slips to "Unbilled"
+                prev_items = select("transport_invoice_items", {"transport_invoice_id": ti_id})
+                prev_slip_ids = {str(it["packing_slip_id"]) for it in prev_items if it.get("packing_slip_id")}
+                for psid in prev_slip_ids:
+                    update("packing_slips", {"status": "Unbilled"}, {"id": psid})
+
+                # 2. Update header and clear items for replacement
                 update("transport_invoices", header, {"id": ti_id})
                 delete("transport_invoice_items", {"transport_invoice_id": ti_id})
             else:
@@ -481,6 +791,21 @@ class TransportInvoiceTab(ft.Column):
             self.charges.value    = str(invoice.get("charges", 0))
             self.price_list.value = str(invoice.get("price_list_id")) if invoice.get("price_list_id") else None
             self.round_off.value  = str(invoice.get("round_off", "0.00"))
+            
+            # Tax & Discounts
+            self.tax_type_dd.value = invoice.get("tax_type", "GST")
+            rate = float(invoice.get("tax_per", 5) or 5)
+            if self.tax_type_dd.value == "IGST":
+                self.igst_rate_tf.value = str(rate)
+            else:
+                self.cgst_rate_tf.value = str(rate/2)
+                self.sgst_rate_tf.value = str(rate/2)
+
+            self.trade_disc.value  = str(invoice.get("td_percent", 0))
+            self.scheme_disc.value = str(invoice.get("spd_percent", 0))
+            self.fest_disc.value   = str(invoice.get("festival_percent", 0))
+            self.spec_disc.value   = str(invoice.get("scd_percent", 0))
+            self.cash_disc.value   = str(invoice.get("cd_percent", 0))
 
             # Load party GST info
             if self.party_dd.value:
@@ -490,40 +815,15 @@ class TransportInvoiceTab(ft.Column):
                     self._party_gst_rate = float(p.get("gst_percent", 5) or 5)
                     self._party_tax_type = p.get("tax_type", "IGST") or "IGST"
 
-            # Load saved items as virtual slips for display
-            db_items = select("transport_invoice_items", {"transport_invoice_id": invoice["id"]})
+            # Load slips (this now fetches both unbilled and already linked ones)
+            self.load_slips(self.party_dd.value)
             
-            # Group items by packing_slip_id to reconstruct the slip rows
-            slip_groups = {}
-            for it in db_items:
-                psid = str(it.get("packing_slip_id", "direct"))
-                if psid not in slip_groups:
-                    slip_groups[psid] = {
-                        "id": psid,
-                        "slip_no": psid,
-                        "slip_date": invoice.get("invoice_date", ""),
-                        "no_of_items": 0,
-                        "total_pcs": 0,
-                        "total_boxes": 0,
-                        "total_amount": 0,
-                    }
-                slip_groups[psid]["no_of_items"] += 1
-                slip_groups[psid]["total_pcs"]   += int(it.get("qty_pieces", 0))
-                slip_groups[psid]["total_boxes"] += float(it.get("qty_boxes", 0))
-                slip_groups[psid]["total_amount"]+= float(it.get("amount", 0))
-
-            # Try to enrich with actual packing slip data
-            for psid, grp in slip_groups.items():
-                if psid != "direct":
-                    ps_data = select("packing_slips", {"id": psid})
-                    if ps_data:
-                        grp["slip_no"]   = ps_data[0].get("slip_no", psid)
-                        grp["slip_date"] = ps_data[0].get("slip_date", grp["slip_date"])
-
-            self._available_slips = list(slip_groups.values())
-            self._selected_slips = {str(s["id"]) for s in self._available_slips}
+            # Pre-select the ones that were in the invoice
+            db_items = select("transport_invoice_items", {"transport_invoice_id": invoice["id"]})
+            self._selected_slips = {str(it["packing_slip_id"]) for it in db_items if it.get("packing_slip_id")}
+            
             self.rebuild_grid()
-
+            self._calc() # Force UI to split CGST/SGST
             self._snack(f"Loaded Invoice: {self.inv_no.value}", AppColors.PRIMARY)
         except Exception as ex:
             print(f"Edit Load Error: {ex}")
@@ -534,10 +834,12 @@ class TransportInvoiceTab(ft.Column):
         def confirm_delete(e):
             try:
                 # Check if billed in a final invoice
-                if invoice.get("status") == "Invoiced":
+                # We check the final_invoices table for any record referencing this TI
+                linked = select("final_invoices", {"transport_invoice_id": invoice["id"]})
+                if linked or invoice.get("status") == "Invoiced":
                     confirm_dlg.open = False
                     self.page.update()
-                    self._snack("Cannot delete: This invoice is already included in a Sales Tax Invoice.", "orange")
+                    self._snack("Cannot delete: This invoice is already included in a Sales Tax Invoice. Delete the Sales Invoice first.", "orange")
                     return
 
                 # 1. Identify associated packing slips

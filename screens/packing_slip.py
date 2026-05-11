@@ -34,41 +34,67 @@ class PackingSlipTab(ft.Column):
 
         # ── Header ───────────────────────────────────────────
         S = AppStyles.get_input_style()
-        self.slip_no   = ft.TextField(label="Slip No",   width=130, **S)
-        self.slip_date = ft.TextField(label="Date",      width=130, value=date.today().isoformat(), **S)
-        self.party_dd  = ft.Dropdown(label="Select Party *", width=280, on_change=self.on_party_change, **S)
-        self.agent_dd  = ft.Dropdown(label="Agent",      width=180, **S)
-        self.trans_dd  = ft.Dropdown(label="Transporter",width=200, **S)
-        self.dest      = ft.TextField(label="Destination",width=160, **S)
-        self.cases     = ft.TextField(label="No of Cases",width=100, value="0", keyboard_type=ft.KeyboardType.NUMBER, on_change=self._update_case_balance, **S)
-        self.prepared  = ft.TextField(label="Prepared By",width=140, **S)
-        self.checked   = ft.TextField(label="Checked By", width=140, **S)
-        self.packed_by = ft.TextField(label="Packed By",  width=140, **S)
+        self.slip_no   = ft.TextField(label="Slip No",   width=110, **S)
+        self.slip_date = ft.TextField(label="Date",      width=110, value=date.today().isoformat(), **S)
+        self.party_dd  = ft.Dropdown(label="Select Party *", width=250, on_change=self.on_party_change, **S)
+        self.agent_dd  = ft.Dropdown(label="Agent",      width=140, **S)
+        self.trans_dd  = ft.Dropdown(label="Transporter",width=180, **S)
+        self.dest      = ft.TextField(label="Destination",width=130, **S)
+        self.cases     = ft.TextField(label="No of Cases",width=85, value="0", keyboard_type=ft.KeyboardType.NUMBER, on_change=self._update_case_balance, **S)
+        self.prepared  = ft.TextField(label="Prepared By",width=120, **S)
+        self.checked   = ft.TextField(label="Checked By", width=120, **S)
+        self.packed_by = ft.TextField(label="Packed By",  width=120, **S)
 
         # ── Header fields ────────────────────────────────────
-        self.party_order_no = ft.TextField(label="Party Order No", width=140, **S)
-        self.party_order_dt = ft.TextField(label="Party Order Dt", width=140, value=date.today().isoformat(), **S)
-        self.order_by       = ft.TextField(label="Order By",       width=140, **S)
-        self.order_thro     = ft.Dropdown(label="Order Thro'",     width=140, value="DIRECT", options=[ft.dropdown.Option("DIRECT"), ft.dropdown.Option("AGENT")], **S)
+        self.party_order_no = ft.TextField(label="Party Order No", width=120, **S)
+        self.party_order_dt = ft.TextField(label="Party Order Dt", width=120, value=date.today().isoformat(), **S)
+        self.order_by       = ft.TextField(label="Order By",       width=120, **S)
+        self.order_thro     = ft.Dropdown(label="Order Thro'",     width=120, value="DIRECT", options=[ft.dropdown.Option("DIRECT"), ft.dropdown.Option("AGENT")], **S)
         self.docs_by        = ft.RadioGroup(content=ft.Row([
-            ft.Text("Docs By:", size=12, weight="bold"),
+            ft.Text("Docs By:", size=11, weight="bold"),
             ft.Radio(value="Direct", label="Direct"),
             ft.Radio(value="Bank",   label="Bank"),
-        ], spacing=10), value="Direct")
-        self.compliments    = ft.TextField(label="Compliments",    width=280, **S)
-        self.qty_type_dd    = ft.Dropdown(label="Qty Type",        width=120, value="Pieces", options=[ft.dropdown.Option("Pieces"), ft.dropdown.Option("Boxes")], **S)
+        ], spacing=8), value="Direct")
+        self.compliments    = ft.TextField(label="Compliments",    width=240, **S)
+        self.qty_type_dd    = ft.Dropdown(label="Qty Type",        width=100, value="Pieces", options=[ft.dropdown.Option("Pieces"), ft.dropdown.Option("Boxes")], **S)
         
         # Case tracking
-        self.total_order_cases = ft.TextField(label="Tot Ord Cases", width=100, value="0", read_only=True, **S)
-        self.packed_cases      = ft.TextField(label="Packed Cases",  width=100, value="0", read_only=True, **S)
-        self.balance_cases     = ft.TextField(label="Balance",       width=100, value="0", read_only=True, **S)
-        self.group_items       = ft.Switch(label="Group by Item", value=False, on_change=lambda _: self._load_pending_orders(self.party_dd.value), active_color=AppColors.PRIMARY)
+        self.total_order_cases = ft.TextField(label="Tot Ord", width=80, value="0", read_only=True, **S)
+        self.packed_cases      = ft.TextField(label="Packed",  width=80, value="0", read_only=True, **S)
+        self.balance_cases     = ft.TextField(label="Bal",     width=80, value="0", read_only=True, **S)
+        self.group_items       = ft.Switch(label="Group",      value=False, on_change=lambda _: self._load_pending_orders(self.party_dd.value), active_color=AppColors.PRIMARY)
 
+        self.no_of_items_lbl = ft.Text("No. Of Items: 0", size=13, weight="bold")
         self.total_pcs   = ft.Text("Total Pcs: 0",   size=13, weight="bold")
         self.total_boxes = ft.Text("Total Boxes: 0", size=13, weight="bold")
 
         self.taxable_val = ft.Text("Taxable: ₹0.00",  size=14, weight="bold")
-        self.gst_lbl     = ft.Text("GST (5%): ₹0.00", size=13, color=AppColors.TEXT_SUB)
+        
+        # Detailed Tax Fields
+        self.tax_type_dd = ft.Dropdown(
+            label="Tax Type",
+            options=[ft.dropdown.Option("GST"), ft.dropdown.Option("IGST")],
+            value="GST",
+            width=120,
+            on_change=self._update_totals
+        )
+        self.gst_rate_tf = ft.TextField(label="GST %", value="5", width=60, on_change=self._update_totals, **S)
+        self.cgst_rate_tf = ft.TextField(label="CGST %", value="0", width=60, on_change=self._update_totals, **S)
+        self.cgst_amt_lbl = ft.Text("Amt: ₹0.00", size=10, color=AppColors.TEXT_SUB)
+        
+        self.sgst_rate_tf = ft.TextField(label="SGST %", value="0", width=60, on_change=self._update_totals, **S)
+        self.sgst_amt_lbl = ft.Text("Amt: ₹0.00", size=10, color=AppColors.TEXT_SUB)
+        
+        self.igst_rate_tf = ft.TextField(label="IGST %", value="0", width=60, on_change=self._update_totals, visible=False, **S)
+        self.igst_amt_lbl = ft.Text("Amt: ₹0.00", size=10, color=AppColors.TEXT_SUB, visible=False)
+        
+        self.cess_rate_tf = ft.TextField(label="Cess %", value="0", width=60, on_change=self._update_totals, **S)
+        self.cess_amt_lbl = ft.Text("Amt: ₹0.00", size=10, color=AppColors.TEXT_SUB)
+        
+        self.tcs_rate_tf = ft.TextField(label="TCS %",  value="0", width=60, on_change=self._update_totals, **S)
+        self.tcs_amt_lbl = ft.Text("Amt: ₹0.00", size=10, color=AppColors.TEXT_SUB)
+
+        self.gst_lbl     = ft.Text("GST: ₹0.00", size=13, color=AppColors.TEXT_SUB)
         self.net_amt     = ft.Text("Total: ₹0.00",    size=20, weight="bold", color=AppColors.PRIMARY)
 
         self.print_mode = ft.RadioGroup(content=ft.Row([
@@ -76,7 +102,35 @@ class PackingSlipTab(ft.Column):
             ft.Radio(value="Dot Matrix", label="Dot Matrix"),
         ]), value="Laser")
         self.export_word = ft.Checkbox(label="Export To Word", value=False)
+        self.trade_disc   = ft.TextField(label="Trade %",  value="0", width=80, on_change=self._calc, **S)
+        self.td_amt_lbl   = ft.Text("Amt: ₹0.00", size=11, color=AppColors.TEXT_SUB)
+        
+        self.scheme_disc  = ft.TextField(label="Scheme %", value="0", width=80, on_change=self._calc, **S)
+        self.spd_amt_lbl  = ft.Text("Amt: ₹0.00", size=11, color=AppColors.TEXT_SUB)
+        
+        self.fest_disc    = ft.TextField(label="Fest %",   value="0", width=80, on_change=self._calc, **S)
+        self.fd_amt_lbl   = ft.Text("Amt: ₹0.00", size=11, color=AppColors.TEXT_SUB)
+        
+        self.spec_disc    = ft.TextField(label="Spec %",   value="0", width=80, on_change=self._calc, **S)
+        self.scd_amt_lbl  = ft.Text("Amt: ₹0.00", size=11, color=AppColors.TEXT_SUB)
+        
+        self.cash_disc    = ft.TextField(label="Cash %",   value="0", width=80, on_change=self._calc, **S)
+        self.cd_amt_lbl   = ft.Text("Amt: ₹0.00", size=11, color=AppColors.TEXT_SUB)
+
         self.round_off   = ft.TextField(label="Round Off", value="0.00", width=100, on_change=self._calc, **S)
+        
+        # --- Dynamic discount ordering (cached from sales.py structure) ---
+        self.DEFAULT_DISCOUNT_ORDER = ["trade", "scheme", "festival", "scd", "cd"]
+        self.DISCOUNT_MAP = {
+            "trade":    {"field": self.trade_disc,  "amt": self.td_amt_lbl},
+            "scheme":   {"field": self.scheme_disc, "amt": self.spd_amt_lbl},
+            "festival": {"field": self.fest_disc,   "amt": self.fd_amt_lbl},
+            "scd":      {"field": self.spec_disc,   "amt": self.scd_amt_lbl},
+            "cd":       {"field": self.cash_disc,   "amt": self.cd_amt_lbl},
+        }
+        self._discount_order = list(self.DEFAULT_DISCOUNT_ORDER)
+        self.discount_row = ft.Row(spacing=15)
+        self._reorder_discount_fields()
 
         # ── Scrollable items ──────────────────────────────────
         self.items_col = ft.Column(scroll=ft.ScrollMode.AUTO, expand=True, spacing=0)
@@ -95,59 +149,76 @@ class PackingSlipTab(ft.Column):
     def _build_header(self):
         return ft.Container(
             bgcolor=ft.colors.WHITE,
-            padding=ft.padding.symmetric(horizontal=24, vertical=16),
+            padding=ft.padding.symmetric(horizontal=24, vertical=8),
             content=ft.Column([
-                # Row 1: Title and Slip Info
+                # Row 1: Title and Core Slip Info
                 ft.Row([
                     ft.Row([
-                        ft.Text("Packing Slip", size=22, weight="bold", color=AppColors.PRIMARY),
-                        ft.OutlinedButton("View History", icon=ft.icons.HISTORY, on_click=self.show_history_modal, style=ft.ButtonStyle(color=AppColors.PRIMARY))
-                    ], spacing=15),
-                    ft.Row([self.slip_no, self.slip_date, self.group_items], spacing=10),
+                        ft.Text("Packing Slip", size=20, weight="bold", color=AppColors.PRIMARY),
+                        ft.OutlinedButton("History", icon=ft.icons.HISTORY, on_click=self.show_history_modal, height=32, style=ft.ButtonStyle(color=AppColors.PRIMARY, padding=ft.padding.symmetric(horizontal=8)))
+                    ], spacing=10),
+                    ft.Row([
+                        self.slip_no, self.slip_date, 
+                        ft.VerticalDivider(width=1, color="#E2E8F0"),
+                        self.group_items,
+                        ft.VerticalDivider(width=1, color="#E2E8F0"),
+                        self.docs_by,
+                    ], spacing=8, vertical_alignment=ft.CrossAxisAlignment.CENTER),
                 ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
                 
-                # Row 2: Party and Tracking
+                # Row 2: Party, Logistics & Assignment
                 ft.Row([
                     self.party_dd, self.agent_dd, self.trans_dd, self.dest,
-                ], spacing=12, wrap=True),
+                    ft.VerticalDivider(width=1, color="#E2E8F0"),
+                    self.prepared, self.checked, self.packed_by,
+                ], spacing=10, wrap=True),
                 
-                # Row 3: Order Details
+                # Row 3: Order Linkage, Metrics & Remarks
                 ft.Row([
                     self.party_order_no, self.party_order_dt, self.order_by, self.order_thro, self.qty_type_dd,
-                ], spacing=12, wrap=True),
-
-                # Row 4: Cases & Prep
-                ft.Row([
-                    self.total_order_cases, self.packed_cases, self.balance_cases, self.cases,
-                    ft.VerticalDivider(width=20),
-                    self.prepared, self.checked, self.packed_by,
-                ], spacing=12, wrap=True),
-
-                # Row 5: Additional Info
-                ft.Row([
-                    self.docs_by,
-                    ft.VerticalDivider(width=20),
+                    ft.VerticalDivider(width=1, color="#E2E8F0"),
+                    ft.Container(
+                        content=ft.Row([
+                            self.total_order_cases, self.packed_cases, self.balance_cases, self.cases
+                        ], spacing=6),
+                        padding=ft.padding.symmetric(horizontal=8, vertical=2),
+                        bgcolor="#F8FAFC",
+                        border_radius=6,
+                        border=ft.border.all(1, "#E2E8F0")
+                    ),
+                    ft.VerticalDivider(width=1, color="#E2E8F0"),
                     self.compliments,
-                ], spacing=30, vertical_alignment=ft.CrossAxisAlignment.CENTER),
-            ], spacing=15),
+                ], spacing=10, vertical_alignment=ft.CrossAxisAlignment.CENTER, wrap=True),
+            ], spacing=8),
         )
 
     def _build_col_header(self):
         return ft.Container(
             bgcolor="#F1F5F9",
-            padding=ft.padding.symmetric(horizontal=24, vertical=8),
+            padding=ft.padding.symmetric(horizontal=24, vertical=6),
+            border=ft.border.only(bottom=ft.border.BorderSide(1, "#E2E8F0")),
             content=ft.Row([
                 ft.Checkbox(on_change=self.toggle_all, tooltip="Select All"),
-                ft.Text("ORDER NO",  width=110, size=11, weight="bold"),
-                ft.Text("ITEM NAME", width=185, size=11, weight="bold"),
-                ft.Text("SIZES",     width=90,  size=11, weight="bold"),
-                ft.Text("RATE",      width=70,  size=11, weight="bold", text_align=ft.TextAlign.RIGHT),
-                ft.Text("ORD QTY",  width=70,  size=11, weight="bold", text_align=ft.TextAlign.RIGHT),
-                ft.Text("BALANCE SHIPMENT", width=120, size=11, weight="bold", text_align=ft.TextAlign.RIGHT),
-                ft.Text("PACK QTY", width=90,  size=11, weight="bold", text_align=ft.TextAlign.RIGHT),
-                ft.Text("AMOUNT",   expand=True, size=11, weight="bold", text_align=ft.TextAlign.RIGHT),
-            ]),
+                ft.Text("ORDER NO",  width=110, size=11, weight="bold", color=AppColors.TEXT_SUB),
+                ft.Text("ITEM NAME", width=220, size=11, weight="bold", color=AppColors.TEXT_SUB),
+                ft.Text("SIZE",      width=80,  size=11, weight="bold", color=AppColors.TEXT_SUB),
+                ft.Text("RATE",      width=80,  size=11, weight="bold", color=AppColors.TEXT_SUB, text_align=ft.TextAlign.RIGHT),
+                ft.Text("ORD QTY",   width=80,  size=11, weight="bold", color=AppColors.TEXT_SUB, text_align=ft.TextAlign.RIGHT),
+                ft.Text("BALANCE",   width=100, size=11, weight="bold", color=AppColors.TEXT_SUB, text_align=ft.TextAlign.RIGHT),
+                ft.Text("PACK QTY",  width=90,  size=11, weight="bold", color=AppColors.TEXT_SUB, text_align=ft.TextAlign.RIGHT),
+                ft.Text("AMOUNT",    expand=True, size=11, weight="bold", color=AppColors.TEXT_SUB, text_align=ft.TextAlign.RIGHT),
+            ], spacing=0)
         )
+
+    def _reorder_discount_fields(self):
+        self.discount_row.controls = []
+        for key in self._discount_order:
+            meta = self.DISCOUNT_MAP.get(key)
+            if meta:
+                self.discount_row.controls.append(
+                    ft.Column([meta["field"], meta["amt"]],
+                              horizontal_alignment=ft.CrossAxisAlignment.CENTER, spacing=2)
+                )
 
     def _build_footer(self):
         return ft.Container(
@@ -155,32 +226,68 @@ class PackingSlipTab(ft.Column):
             padding=ft.padding.symmetric(horizontal=24, vertical=16),
             border=ft.border.only(top=ft.border.BorderSide(1, "#E2E8F0")),
             content=ft.Column([
-                # Totals and Discounts
+                # Row 1: Totals and Discounts
                 ft.Row([
                     ft.Column([
-                        ft.Row([self.total_pcs, ft.Text(" | ", color="#999"), self.total_boxes]),
-                        self.print_mode,
-                        self.export_word,
+                        self.no_of_items_lbl,
+                        ft.Row([self.total_pcs, ft.Text(" | "), self.total_boxes], spacing=10),
+                        ft.Row([self.print_mode, ft.VerticalDivider(width=10), self.export_word], spacing=10, vertical_alignment=ft.CrossAxisAlignment.CENTER),
                     ], spacing=5),
                     ft.Container(expand=True),
-                    ft.Column([
-                        ft.Row([self.round_off], alignment=ft.MainAxisAlignment.END),
-                    ], horizontal_alignment=ft.CrossAxisAlignment.END),
+                    self.discount_row,
                 ]),
+
                 ft.Divider(height=1, color="#E2E8F0"),
-                # Final Actions
+
+                # Row 2: Tax Breakup and Actions
                 ft.Row([
-                    ft.Column([self.taxable_val, self.gst_lbl], spacing=2),
-                    ft.Container(expand=True),
-                    self.net_amt,
-                    ft.IconButton(ft.icons.REFRESH, on_click=lambda _: self.did_mount(), tooltip="Refresh Data"),
+                    ft.Column([
+                        self.taxable_val,
+                        ft.Row([
+                            self.tax_type_dd,
+                            self.gst_rate_tf,
+                            ft.VerticalDivider(width=1, color="#E2E8F0"),
+                            ft.Column([self.cgst_rate_tf, self.cgst_amt_lbl], spacing=2, horizontal_alignment=ft.CrossAxisAlignment.CENTER),
+                            ft.Column([self.sgst_rate_tf, self.sgst_amt_lbl], spacing=2, horizontal_alignment=ft.CrossAxisAlignment.CENTER),
+                            ft.Column([self.igst_rate_tf, self.igst_amt_lbl], spacing=2, horizontal_alignment=ft.CrossAxisAlignment.CENTER),
+                            ft.VerticalDivider(width=1, color="#E2E8F0"),
+                            ft.Column([self.cess_rate_tf, self.cess_amt_lbl], spacing=2, horizontal_alignment=ft.CrossAxisAlignment.CENTER),
+                            ft.Column([self.tcs_rate_tf,  self.tcs_amt_lbl],  spacing=2, horizontal_alignment=ft.CrossAxisAlignment.CENTER),
+                            ft.VerticalDivider(width=1, color="#E2E8F0"),
+                            self.gst_lbl,
+                        ], spacing=15, vertical_alignment=ft.CrossAxisAlignment.CENTER),
+                    ], spacing=2, expand=True),
+
+                    ft.VerticalDivider(width=1, color="#E2E8F0"),
+
+                    # Round Off Section
+                    ft.Column([
+                        self.round_off,
+                        ft.Row([
+                            ft.IconButton(ft.icons.REFRESH, on_click=lambda _: self.did_mount(), tooltip="Refresh Data", icon_size=16),
+                            ft.Text("Refresh", size=10, color=AppColors.TEXT_SUB),
+                        ], spacing=0),
+                    ], spacing=2, horizontal_alignment=ft.CrossAxisAlignment.CENTER),
+
+                    ft.Container(width=20),
+
+                    # Grand Total Section
+                    ft.Column([
+                        ft.Text("Grand Total", size=11, color=AppColors.TEXT_SUB, weight="w500"),
+                        self.net_amt,
+                    ], spacing=0, horizontal_alignment=ft.CrossAxisAlignment.END),
+
+                    ft.Container(width=10),
+
                     ft.ElevatedButton(
-                        "Confirm & Save Slip", icon=ft.icons.SAVE_ALT,
-                        on_click=self.save_slip, height=50,
+                        "Confirm & Save Slip",
+                        icon=ft.icons.CHECK_CIRCLE,
+                        on_click=self.save_slip,
+                        height=48,
                         style=AppStyles.primary_button_style(),
                     ),
-                ]),
-            ], spacing=15),
+                ], vertical_alignment=ft.CrossAxisAlignment.CENTER),
+            ], spacing=12),
         )
 
     # ─────────────────────────────────────────────────────────
@@ -295,6 +402,28 @@ class PackingSlipTab(ft.Column):
             if not self.order_thro.value: self.order_thro.value = first.get("order_thro", "DIRECT")
             if not self.docs_by.value:    self.docs_by.value    = first.get("documents_by", "Direct")
             
+            # Inherit Tax and Discounts from the Order
+            self.tax_type_dd.value = first.get("tax_type", "GST") or "GST"
+            
+            # Populate discount fields
+            self.trade_disc.value  = str(first.get("td_percent") or 0)
+            self.scheme_disc.value = str(first.get("spd_percent") or 0)
+            self.fest_disc.value   = str(first.get("festival_percent") or 0)
+            self.spec_disc.value   = str(first.get("scd_percent") or 0)
+            self.cash_disc.value   = str(first.get("cd_percent") or 0)
+            
+            # Tax rates if standard GST/IGST (otherwise inherited from items)
+            rate = float(first.get("tax_per", 5) or 5)
+            if self.tax_type_dd.value == "IGST":
+                self.igst_rate_tf.value = str(rate)
+                self.cgst_rate_tf.value = "0"
+                self.sgst_rate_tf.value = "0"
+            else:
+                self.cgst_rate_tf.value = str(rate/2)
+                self.sgst_rate_tf.value = str(rate/2)
+                self.igst_rate_tf.value = "0"
+            
+            self._active_order_data = first 
             if self.page: self.update()
 
             order_ids = [str(o["id"]) for o in pending]
@@ -339,9 +468,10 @@ class PackingSlipTab(ft.Column):
                     k = (item_id, size_val)
                     if k not in grouped_data:
                         grouped_data[k] = {
-                            "item_id": item_id, "size_value": size_val,
-                            "rate": rate, "total_available": 0,
-                            "sources": [] # [(order_id, avail), ...]
+                            "rate": rate,
+                            "item_name": oi.get("item_name") or self._all_items_meta.get(item_id, {}).get("item_name", "Unknown"),
+                            "total_available": 0,
+                            "sources": []
                         }
                     grouped_data[k]["total_available"] += available
                     grouped_data[k]["sources"].append({"order_id": order_id, "avail": available, "order_qty": order_qty})
@@ -363,7 +493,7 @@ class PackingSlipTab(ft.Column):
                     )
                     self._pending_items.append({
                         "order_id": "Multiple", "order_no": "GRP",
-                        "item_id": item_id, "item_name": meta.get("item_name", "Unknown"),
+                        "item_id": item_id, "item_name": g["item_name"],
                         "size_value": size_val, "rate": g["rate"],
                         "order_qty": available, "available": available,
                         "inner": inner, "outer": outer,
@@ -402,8 +532,9 @@ class PackingSlipTab(ft.Column):
                     )
                     self._pending_items.append({
                         "order_id": order_id, "order_no": order_no,
-                        "item_id": item_id, "item_name": meta.get("item_name", "Unknown"),
+                        "item_id": item_id, "item_name": oi.get("item_name") or meta.get("item_name", "Unknown"),
                         "size_value": size_val, "rate": rate,
+                        "tax_percent": float(oi.get("tax_percent", 5) or 5),
                         "order_qty": order_qty, "available": available,
                         "inner": inner, "outer": outer,
                         "tf": tf, "amt_lbl": amt_lbl, "key": key,
@@ -460,30 +591,49 @@ class PackingSlipTab(ft.Column):
         amount = pcs * it["rate"]
         it["amt_lbl"].value = f"₹{amount:,.2f}"
         
+        # Ensure the textfield has a consistent width for PACK QTY column
+        it["tf"].width = 80
+
         return ft.Container(
             bgcolor=ft.colors.WHITE,
-            padding=ft.padding.symmetric(horizontal=24, vertical=8),
+            padding=ft.padding.symmetric(horizontal=24, vertical=4),
             border=ft.border.only(bottom=ft.border.BorderSide(1, "#F1F5F9")),
             content=ft.Row([
                 ft.Checkbox(
                     value=(it["key"] in self._selected_item_keys),
                     on_change=lambda e, k=it["key"]: self.on_item_toggle(k, e.control.value)
                 ),
-                ft.Text(it["order_no"],            width=110, size=12, color=AppColors.PRIMARY),
-                ft.Text(it["item_name"],           width=185, size=13, weight="w500"),
-                ft.Text(it["size_value"],          width=90,  size=11, italic=True, color=AppColors.TEXT_SUB),
-                ft.Text(f"₹{it['rate']}",         width=70,  size=13, text_align=ft.TextAlign.RIGHT),
-                ft.Text(str(it["order_qty"]),      width=70,  size=12, text_align=ft.TextAlign.RIGHT),
-                ft.Text(str(it["available"]),      width=120, size=12, text_align=ft.TextAlign.RIGHT, color="green"),
-                it["tf"],
+                ft.Text(it["order_no"],            width=110, size=12, color=AppColors.PRIMARY, weight="bold"),
+                ft.Text(it["item_name"],           width=220, size=13, weight="w500"),
+                ft.Text(it["size_value"],          width=80,  size=12, color=AppColors.TEXT_SUB),
+                ft.Text(f"₹{it['rate']:,.2f}",     width=80,  size=13, text_align=ft.TextAlign.RIGHT),
+                ft.Text(str(it["order_qty"]),      width=80,  size=12, text_align=ft.TextAlign.RIGHT),
+                ft.Text(str(it["available"]),      width=100, size=12, text_align=ft.TextAlign.RIGHT, color="green", weight="bold"),
+                ft.Container(content=it["tf"], width=90, alignment=ft.alignment.center_right),
                 it["amt_lbl"],
-            ]),
+            ], spacing=0),
         )
 
     # ─────────────────────────────────────────────────────────
     # Totals
     # ─────────────────────────────────────────────────────────
-    def _update_totals(self):
+    def _update_totals(self, e=None):
+        trigger = e.control if e and hasattr(e, "control") else e if isinstance(e, ft.Control) else None
+        
+        # 1. Sync CGST/SGST if GST rate changed or mode switched
+        if trigger == self.gst_rate_tf or trigger == self.tax_type_dd:
+            try:
+                val_str = str(self.gst_rate_tf.value or "").strip()
+                if val_str.endswith("."): gst_p = float(val_str + "0")
+                else: gst_p = float(val_str or 0)
+                
+                if self.tax_type_dd.value == "GST":
+                    self.cgst_rate_tf.value = f"{gst_p/2:g}"
+                    self.sgst_rate_tf.value = f"{gst_p/2:g}"
+                else:
+                    self.igst_rate_tf.value = f"{gst_p:g}"
+            except: pass
+
         # Guard against recursive calls
         if self._calculating:
             return
@@ -514,6 +664,89 @@ class PackingSlipTab(ft.Column):
             total_boxes += boxes
             gross       += row_amt
         
+        # 1. Base -> Sequential Discounts = Discounted Total (Taxable)
+        running_total = gross
+        for key in self._discount_order:
+            meta = self.DISCOUNT_MAP.get(key)
+            if meta:
+                try:
+                    d = float(meta["field"].value or 0)
+                    disc_amt = running_total * (d / 100)
+                    meta["amt"].value = f"Amt: ₹{disc_amt:,.2f}"
+                    running_total -= disc_amt
+                except: pass
+        
+        taxable = running_total
+        
+        # 2. GST and other taxes on Discounted Total
+        total_gst = 0
+        for it in self._pending_items:
+            if it["key"] in self._selected_item_keys:
+                try:
+                    q = int(it["tf"].value or 0)
+                    # Note: We apply header discounts to the item amount for proper per-item GST if needed
+                    # For now, we sum up the inherited item-level tax
+                    amt = q * it["rate"]
+                    # If we have header discounts, we should probably scale the inherited GST
+                    # But for consistency with sales.py, we'll re-calculate GST on the discounted taxable total
+                    pass
+                except: pass
+        
+        # Breakdown tax fields
+        tax_type = self.tax_type_dd.value
+        cgst_rate = float(self.cgst_rate_tf.value or 0)
+        sgst_rate = float(self.sgst_rate_tf.value or 0)
+        igst_rate = float(self.igst_rate_tf.value or 0)
+        cess_rate = float(self.cess_rate_tf.value or 0)
+        tcs_rate  = float(self.tcs_rate_tf.value or 0)
+        
+        cgst_amt = taxable * (cgst_rate / 100) if tax_type == "GST" else 0
+        sgst_amt = taxable * (sgst_rate / 100) if tax_type == "GST" else 0
+        igst_amt = taxable * (igst_rate / 100) if tax_type == "IGST" else 0
+        cess_amt = taxable * (cess_rate / 100)
+        
+        # Total GST
+        gst = cgst_amt + sgst_amt + igst_amt
+        # Fallback to inherited GST if manual rates are 0
+        if not gst:
+            for it in self._pending_items:
+                if it["key"] in self._selected_item_keys:
+                    try:
+                        q = int(it["tf"].value or 0)
+                        amt = q * it["rate"]
+                        # Scale amt by the same factor as taxable/gross
+                        if gross > 0:
+                            item_taxable = amt * (taxable / gross)
+                            total_gst += item_taxable * (it.get("tax_percent", 5) / 100)
+                    except: pass
+            gst = total_gst
+
+        tcs_amt  = (taxable + gst) * (tcs_rate / 100)
+        
+        self.cgst_amt_lbl.value = f"Amt: ₹{cgst_amt:,.2f}"
+        self.sgst_amt_lbl.value = f"Amt: ₹{sgst_amt:,.2f}"
+        self.igst_amt_lbl.value = f"Amt: ₹{igst_amt:,.2f}"
+        self.cess_amt_lbl.value = f"Amt: ₹{cess_amt:,.2f}"
+        self.tcs_amt_lbl.value  = f"Amt: ₹{tcs_amt:,.2f}"
+        
+        # Visibilities
+        self.igst_rate_tf.visible = self.igst_amt_lbl.visible = (tax_type == "IGST")
+        self.cgst_rate_tf.visible = self.cgst_amt_lbl.visible = (tax_type == "GST")
+        self.sgst_rate_tf.visible = self.sgst_amt_lbl.visible = (tax_type == "GST")
+             
+        subtotal = taxable + gst + cess_amt + tcs_amt
+        final_amt = math.ceil(subtotal)
+        roff = final_amt - subtotal
+        
+        self.total_pcs.value = f"Total Pcs: {int(total_pcs)}"
+        self.total_boxes.value = f"Total Boxes: {total_boxes:.1f}"
+        self.taxable_val.value = f"Taxable: ₹{taxable:,.2f}"
+        self.gst_lbl.value = f"{tax_type}: ₹{gst:,.2f}"
+        self.round_off.value = f"{roff:.2f}"
+        self.net_amt.value = f"Total: ₹{final_amt:,.2f}"
+        
+        if self.page: self.update()
+        
         # Case Tracking from cached data (no DB calls)
         tot_ord_cases = 0
         packed_cases  = 0
@@ -533,20 +766,6 @@ class PackingSlipTab(ft.Column):
         self.packed_cases.value      = str(packed_cases)
         self._update_case_balance()
 
-        # Footer totals
-        gst  = gross * (self._party_gst_rate / 100)
-        
-        subtotal = gross + gst
-        final_amt = math.ceil(subtotal)
-        roff = final_amt - subtotal
-
-        self.total_pcs.value   = f"Total Pcs: {int(total_pcs)}"
-        self.total_boxes.value = f"Total Boxes: {math.ceil(total_boxes)}"
-        self.taxable_val.value = f"Taxable: ₹{gross:,.2f}"
-        self.gst_lbl.value     = f"{self._party_tax_type} ({self._party_gst_rate:.0f}%): ₹{gst:,.2f}"
-        self.round_off.value   = f"{roff:.2f}"
-        self.net_amt.value     = f"Total: ₹{final_amt:,.2f}"
-
         self._calculating = False
 
     # ─────────────────────────────────────────────────────────
@@ -555,6 +774,10 @@ class PackingSlipTab(ft.Column):
     def save_slip(self, e):
         if not self.party_dd.value:
             self._snack("Select a party first!", "red")
+            return
+
+        if not self.tax_type_dd.value:
+            self._snack("Please select a Tax Type (GST/IGST) before saving!", "red")
             return
 
         rows_to_pack = []
@@ -589,6 +812,46 @@ class PackingSlipTab(ft.Column):
             slip_dt = str(self.slip_date.value or date.today().isoformat())
             slip_yr = slip_dt.split("-")[0] if "-" in slip_dt else ""
 
+            # Recalculate precisely using UI values for persistence
+            tax_type = self.tax_type_dd.value
+            cgst_rate = float(self.cgst_rate_tf.value or 0)
+            sgst_rate = float(self.sgst_rate_tf.value or 0)
+            igst_rate = float(self.igst_rate_tf.value or 0)
+            cess_rate = float(self.cess_rate_tf.value or 0)
+            tcs_rate  = float(self.tcs_rate_tf.value or 0)
+            
+            # Sequence calculation (mirrors _calc)
+            running_total = gross
+            discs = {}
+            for key in self._discount_order:
+                meta = self.DISCOUNT_MAP.get(key)
+                if meta:
+                    d = float(meta["field"].value or 0)
+                    amt = running_total * (d / 100)
+                    discs[key] = {"p": d, "a": amt}
+                    running_total -= amt
+            
+            taxable = running_total
+            cgst_amt = taxable * (cgst_rate / 100) if tax_type == "GST" else 0
+            sgst_amt = taxable * (sgst_rate / 100) if tax_type == "GST" else 0
+            igst_amt = taxable * (igst_rate / 100) if tax_type == "IGST" else 0
+            cess_amt = taxable * (cess_rate / 100)
+            gst = cgst_amt + sgst_amt + igst_amt
+            
+            # Fallback to inherited GST if manual is 0
+            if not gst:
+                total_gst = 0
+                for it, q in rows_to_pack:
+                    amt = q * it["rate"]
+                    if gross > 0:
+                        item_taxable = amt * (taxable / gross)
+                        total_gst += item_taxable * (it.get("tax_percent", 5) / 100)
+                gst = total_gst
+
+            tcs_amt = (taxable + gst) * (tcs_rate / 100)
+            roff = float(self.round_off.value or 0)
+            net = round(taxable + gst + cess_amt + tcs_amt + roff, 0)
+            
             header = {
                 "company_id":     state.company_id,
                 "slip_no":        slip_no,
@@ -608,6 +871,8 @@ class PackingSlipTab(ft.Column):
                 "total_order_cases": int(self.total_order_cases.value or 0),
                 "packed_cases":      int(self.packed_cases.value or 0),
                 "no_of_cases":       int(self.cases.value or 0),
+                "price_list_id":  self._active_order_data.get("price_list_id") if hasattr(self, "_active_order_data") else None,
+                "price_type":     self._active_order_data.get("price_type") if hasattr(self, "_active_order_data") else "Wholesale",
                 "prepared_by":    self.prepared.value,
                 "checked_by":     self.checked.value,
                 "packed_by":      self.packed_by.value,
@@ -617,19 +882,22 @@ class PackingSlipTab(ft.Column):
                 "total_pcs":      int(total_pcs),
                 "total_boxes":    round(total_boxes, 2),
                 "total_amount":   round(gross, 2),
-                "aftdis_amount":  round(gross, 2),
-                "td_percent":     0,
-                "td_amount":      0,
-                "spd_percent":    0,
-                "spd_amount":     0,
-                "festival_percent": 0,
-                "scd_percent":    0,
-                "cd_percent":     0,
-                "tax_type":       self._party_tax_type,
-                "tax_per":        self._party_gst_rate,
-                "tax_amount":     round(gst, 2),
-                "round_off":      float(self.round_off.value or 0),
-                "net_amount":     round(gross + gst + float(self.round_off.value or 0), 2),
+                "aftdis_amount":  round(taxable, 2),
+                "td_percent":     discs.get("trade", {}).get("p", 0),
+                "td_amount":      round(discs.get("trade", {}).get("a", 0), 2),
+                "spd_percent":    discs.get("scheme", {}).get("p", 0),
+                "spd_amount":     round(discs.get("scheme", {}).get("a", 0), 2),
+                "festival_percent": discs.get("festival", {}).get("p", 0),
+                "festival_amount":  round(discs.get("festival", {}).get("a", 0), 2),
+                "scd_percent":    discs.get("scd", {}).get("p", 0),
+                "scd_amount":     round(discs.get("scd", {}).get("a", 0), 2),
+                "cd_percent":     discs.get("cd", {}).get("p", 0),
+                "cd_amount":      round(discs.get("cd", {}).get("a", 0), 2),
+                "tax_type":       tax_type,
+                "tax_per":        igst_rate if tax_type == "IGST" else cgst_rate * 2,
+                "tax_amount":     round(gst + cess_amt + tcs_amt, 2),
+                "round_off":      roff,
+                "net_amount":     net,
                 "status":         "Unbilled",
             }
             
@@ -653,6 +921,14 @@ class PackingSlipTab(ft.Column):
             packed_items_for_pdf = []
             packed_by_order = {}
             
+            # Calculate Footer Discount Multiplier
+            footer_multiplier = 1.0
+            for key in self._discount_order:
+                meta = self.DISCOUNT_MAP.get(key)
+                if meta:
+                    d = float(meta["field"].value or 0)
+                    footer_multiplier *= (1 - d / 100)
+
             for it, qty in rows_to_pack:
                 # Distribute quantity across source orders (if grouped)
                 fulfillments = []
@@ -677,7 +953,9 @@ class PackingSlipTab(ft.Column):
                 for f in fulfillments:
                     f_qty = f["qty"]
                     boxes  = f_qty / ((it["inner"] or 1) * (it["outer"] or 1))
-                    amount = f_qty * it["rate"]
+                    
+                    # Calculate net amount for this item row based on inherited discounts
+                    amount = f_qty * it["rate"] * footer_multiplier
                     
                     item_row = {
                         "company_id":     state.company_id,
@@ -915,13 +1193,20 @@ class PackingSlipTab(ft.Column):
             self.packed_by.value    = slip.get("packed_by", "")
             self.round_off.value    = str(slip.get("round_off", "0.00"))
 
-            # Load party GST info
-            if self.party_dd.value:
-                pdata = select("parties", {"id": self.party_dd.value})
-                if pdata:
-                    p = pdata[0]
-                    self._party_gst_rate = float(p.get("gst_percent", 5) or 5)
-                    self._party_tax_type = p.get("tax_type", "GST") or "GST"
+            # Load Tax & Discounts
+            self.tax_type_dd.value = slip.get("tax_type", "GST")
+            rate = float(slip.get("tax_per", 5) or 5)
+            if self.tax_type_dd.value == "IGST":
+                self.igst_rate_tf.value = str(rate)
+            else:
+                self.cgst_rate_tf.value = str(rate/2)
+                self.sgst_rate_tf.value = str(rate/2)
+
+            self.trade_disc.value  = str(slip.get("td_percent", 0))
+            self.scheme_disc.value = str(slip.get("spd_percent", 0))
+            self.fest_disc.value   = str(slip.get("festival_percent", 0))
+            self.spec_disc.value   = str(slip.get("scd_percent", 0))
+            self.cash_disc.value   = str(slip.get("cd_percent", 0))
 
             # Load saved items back into the grid
             db_items = select("packing_slip_items", {"packing_slip_id": slip["id"]})
@@ -1005,6 +1290,7 @@ class PackingSlipTab(ft.Column):
                 self._selected_item_keys.add(key)
 
             self._rebuild_grid()
+            self._update_totals()
             self._snack(f"Loaded Slip: {self.slip_no.value}", AppColors.PRIMARY)
         except Exception as ex:
             print(f"Edit Load Error: {ex}")

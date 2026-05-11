@@ -112,6 +112,9 @@ class PartyMasterForm(ft.Stack):
             label="Tax Slab", width=220, on_change=self.on_tax_change, **self.style_args
         )
         self.tax_details = ft.Text("", size=11, italic=True, color=AppColors.TEXT_SUB)
+        self.gst_percent = ft.TextField(label="Total Rate %", width=100, value="0",
+                                          on_change=self.on_gst_pct_change,
+                                          keyboard_type=ft.KeyboardType.NUMBER, **self.style_args)
         self.cgst_percent = ft.TextField(label="CGST %", width=80, value="0",
                                           keyboard_type=ft.KeyboardType.NUMBER, **self.style_args)
         self.sgst_percent = ft.TextField(label="SGST %", width=80, value="0",
@@ -121,8 +124,6 @@ class PartyMasterForm(ft.Stack):
         self.tcs_percent = ft.TextField(label="TCS %", width=80, value="0",
                                          keyboard_type=ft.KeyboardType.NUMBER, **self.style_args)
         self.cess_percent = ft.TextField(label="CESS %", width=80, value="0",
-                                          keyboard_type=ft.KeyboardType.NUMBER, **self.style_args)
-        self.gst_percent = ft.TextField(label="Total Rate %", width=100, value="0",
                                           keyboard_type=ft.KeyboardType.NUMBER, **self.style_args)
         
         self.tcs_applicable = ft.Checkbox(label="TCS Appl.", value=False, check_color=AppColors.PRIMARY)
@@ -346,6 +347,17 @@ class PartyMasterForm(ft.Stack):
             self.update()
         except:
             pass
+
+    def on_gst_pct_change(self, e):
+        try:
+            val = float(self.gst_percent.value or 0)
+            t_type = self.tax_type.value or "GST"
+            if "GST" in t_type.upper() and "IGST" not in t_type.upper():
+                # Standard Split only for GST
+                self.cgst_percent.value = str(val / 2)
+                self.sgst_percent.value = str(val / 2)
+                self.update()
+        except: pass
 
     def on_tax_change(self, e):
         tax_name = self.tax_type.value
@@ -1094,12 +1106,13 @@ class MastersScreen(ft.Container):
                 {"name": "tax_type",    "label": "Tax Type",    "type": "dropdown",
                  "options": [{"value": "GST", "label": "GST"}, {"value": "IGST", "label": "IGST"},
                              {"value": "TCS", "label": "TCS"},  {"value": "Exempt", "label": "Exempt"}]},
+                {"name": "rate_percent",  "label": "Total Tax Rate %", "type": "number", "default": "0",
+                 "on_change": self._on_tax_rate_split_change},
                 {"name": "cgst_percent",  "label": "CGST %",   "type": "number", "default": "0"},
                 {"name": "sgst_percent",  "label": "SGST %",   "type": "number", "default": "0"},
                 {"name": "igst_percent",  "label": "IGST %",   "type": "number", "default": "0"},
                 {"name": "tcs_percent",   "label": "TCS %",    "type": "number", "default": "0"},
                 {"name": "cess_percent",  "label": "CESS %",   "type": "number", "default": "0"},
-                {"name": "rate_percent",  "label": "Total Tax Rate %", "type": "number", "default": "0"},
             ],
             [
                 {"key": "name",        "label": "Tax Name"},
@@ -1114,6 +1127,21 @@ class MastersScreen(ft.Container):
             ],
             self.save_tax
         )
+    
+    def _on_tax_rate_split_change(self, e):
+        try:
+            val = float(e.control.value or 0)
+            t_type = self.form.controls_map.get("tax_type").value
+            
+            if t_type == "GST":
+                self.form.controls_map["cgst_percent"].value = str(val / 2)
+                self.form.controls_map["sgst_percent"].value = str(val / 2)
+                self.form.controls_map["igst_percent"].value = "0"
+            
+            self.form.update()
+        except Exception as ex:
+            print(f"Tax split error: {ex}")
+
     def save_tax(self, data):
         data["company_id"] = state.company_id
         for pct_field in ["cgst_percent", "sgst_percent", "igst_percent", "tcs_percent", "cess_percent", "rate_percent"]:

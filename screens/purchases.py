@@ -87,7 +87,26 @@ class PurchaseOrderTab(ft.Column):
         self.td_amt_lbl   = ft.Text("Amt: ₹0.00", size=11, color=AppColors.TEXT_SUB)
         
         self.taxable_value = ft.Text("Taxable: ₹0.00",   size=14, weight="bold")
-        self.gst_amount    = ft.Text("GST (5%): ₹0.00",  size=13, color=AppColors.TEXT_SUB)
+        
+        # Detailed Tax Fields
+        self.tax_type_dd = ft.Dropdown(
+            label="Tax Type",
+            options=[ft.dropdown.Option("GST"), ft.dropdown.Option("IGST")],
+            value="GST",
+            width=120,
+            on_change=self.on_calc_change
+        )
+        self.gst_rate_tf = ft.TextField(label="GST %", value="5", width=60, on_change=self.on_calc_change, **S)
+        self.cgst_rate_tf = ft.TextField(label="CGST %", value="2.5", width=60, on_change=self.on_calc_change, **S)
+        self.cgst_amt_lbl = ft.Text("Amt: ₹0.00", size=10, color=AppColors.TEXT_SUB)
+        
+        self.sgst_rate_tf = ft.TextField(label="SGST %", value="2.5", width=60, on_change=self.on_calc_change, **S)
+        self.sgst_amt_lbl = ft.Text("Amt: ₹0.00", size=10, color=AppColors.TEXT_SUB)
+        
+        self.igst_rate_tf = ft.TextField(label="IGST %", value="5", width=60, on_change=self.on_calc_change, visible=False, **S)
+        self.igst_amt_lbl = ft.Text("Amt: ₹0.00", size=10, color=AppColors.TEXT_SUB, visible=False)
+
+        self.gst_lbl     = ft.Text("GST: ₹0.00", size=13, color=AppColors.TEXT_SUB)
         self.round_off     = ft.TextField(label="Round Off", value="0.00", width=100, on_change=self.on_calc_change, **S)
         self.gross_amount  = ft.Text("Total: ₹0.00",      size=20, weight="bold", color=AppColors.PRIMARY)
 
@@ -174,8 +193,14 @@ class PurchaseOrderTab(ft.Column):
                 ft.Column([
                     ft.Row([
                         ft.Column([
-                            self.taxable_value, 
-                            self.gst_amount
+                            self.taxable_value,
+                            ft.Row([
+                                self.tax_type_dd, self.gst_rate_tf,
+                                ft.VerticalDivider(width=1, color="#E2E8F0"),
+                                ft.Column([self.cgst_rate_tf, self.cgst_amt_lbl], spacing=2, horizontal_alignment=ft.CrossAxisAlignment.CENTER),
+                                ft.Column([self.sgst_rate_tf, self.sgst_amt_lbl], spacing=2, horizontal_alignment=ft.CrossAxisAlignment.CENTER),
+                                ft.Column([self.igst_rate_tf, self.igst_amt_lbl], spacing=2, horizontal_alignment=ft.CrossAxisAlignment.CENTER),
+                            ], vertical_alignment=ft.CrossAxisAlignment.CENTER),
                         ], horizontal_alignment=ft.CrossAxisAlignment.END, spacing=2),
                         ft.Container(width=10),
                         ft.Column([
@@ -325,7 +350,23 @@ class PurchaseOrderTab(ft.Column):
     # ─────────────────────────────────────────────────────────
     # Calculations
     # ─────────────────────────────────────────────────────────
-    def on_calc_change(self, e):
+    def on_calc_change(self, e=None):
+        trigger = e.control if e and hasattr(e, "control") else e if isinstance(e, ft.Control) else None
+        
+        # 1. Sync CGST/SGST if GST rate changed or mode switched
+        if trigger == self.gst_rate_tf or trigger == self.tax_type_dd:
+            try:
+                val_str = str(self.gst_rate_tf.value or "").strip()
+                if val_str.endswith("."): gst_p = float(val_str + "0")
+                else: gst_p = float(val_str or 0)
+                
+                if self.tax_type_dd.value == "GST":
+                    self.cgst_rate_tf.value = f"{gst_p/2:g}"
+                    self.sgst_rate_tf.value = f"{gst_p/2:g}"
+                else:
+                    self.igst_rate_tf.value = f"{gst_p:g}"
+            except: pass
+
         total_pcs = 0
         gross_sum = 0
 
@@ -339,13 +380,47 @@ class PurchaseOrderTab(ft.Column):
                 gross_sum += amt
             except: pass
 
+        # Mandate 2025/2026 Suggestions
+        if self.order_items and trigger != self.gst_rate_tf:
+            valid_items = [it for it in self.order_items if it["item_dd"].value]
+            if valid_items:
+                max_rate = max(float(it["rate_tf"].value or 0) for it in valid_items)
+                mandated_rate = 18.0 if max_rate > 2500 else 5.0
+                curr_val = float(self.gst_rate_tf.value or 0)
+                if curr_val == 0:
+                    self.gst_rate_tf.value = str(mandated_rate)
+                    if self.tax_type_dd.value == "GST":
+                        self.cgst_rate_tf.value = f"{mandated_rate/2:g}"
+                        self.sgst_rate_tf.value = f"{mandated_rate/2:g}"
+                    else:
+                        self.igst_rate_tf.value = f"{mandated_rate:g}"
+
         # Apply Discount
         td_p = float(self.trade_disc.value or 0)
         td_amt = gross_sum * (td_p / 100)
         self.td_amt_lbl.value = f"Amt: ₹{td_amt:,.2f}"
         
         taxable = gross_sum - td_amt
-        gst = taxable * 0.05 
+        tax_type = str(self.tax_type_dd.value or "GST").upper()
+        
+        # Breakdown calculation
+        c_rate = float(self.cgst_rate_tf.value or 0)
+        s_rate = float(self.sgst_rate_tf.value or 0)
+        i_rate = float(self.igst_rate_tf.value or 0)
+        
+        cgst_amt = taxable * (c_rate / 100) if tax_type == "GST" else 0
+        sgst_amt = taxable * (s_rate / 100) if tax_type == "GST" else 0
+        igst_amt = taxable * (i_rate / 100) if tax_type == "IGST" else 0
+        
+        self.cgst_amt_lbl.value = f"Amt: ₹{cgst_amt:,.2f}"
+        self.sgst_amt_lbl.value = f"Amt: ₹{sgst_amt:,.2f}"
+        self.igst_amt_lbl.value = f"Amt: ₹{igst_amt:,.2f}"
+        
+        self.cgst_rate_tf.visible = self.cgst_amt_lbl.visible = (tax_type == "GST")
+        self.sgst_rate_tf.visible = self.sgst_amt_lbl.visible = (tax_type == "GST")
+        self.igst_rate_tf.visible = self.igst_amt_lbl.visible = (tax_type == "IGST")
+        
+        gst = cgst_amt + sgst_amt + igst_amt
         
         # Include Expenses
         fr = float(self.freight_charge.value or 0)
@@ -358,7 +433,6 @@ class PurchaseOrderTab(ft.Column):
         self.no_of_items_lbl.value = f"No. Of Items: {len([i for i in self.order_items if i['item_dd'].value])}"
         self.total_pcs.value = f"Total Pcs: {int(total_pcs)}"
         self.taxable_value.value = f"Taxable: ₹{taxable:,.2f}"
-        self.gst_amount.value = f"GST (5%): ₹{gst:,.2f}"
         self.round_off.value = f"{roff:.2f}"
         self.gross_amount.value = f"Total: ₹{final_amt:,.2f}"
 
@@ -489,12 +563,57 @@ class PurchaseOrderTab(ft.Column):
                             ft.Text(p_name, size=12, color=AppColors.TEXT_SUB),
                         ], expand=True),
                         ft.Text(f"₹ {float(ord.get('total_amount', 0)):,.2f}", weight="bold"),
+                        ft.IconButton(ft.icons.EDIT, on_click=lambda e, o=ord: self.load_for_edit(o), icon_color=AppColors.PRIMARY),
                         ft.IconButton(ft.icons.PRINT, on_click=lambda e, o=ord: self.print_history_po(o))
                     ])
                 )
             )
-        dlg = ft.AlertDialog(title=ft.Text("PO History"), content=ft.Container(lv, width=600, height=400))
-        self.page.overlay.append(dlg); dlg.open = True; self.page.update()
+        self._history_dlg = ft.AlertDialog(title=ft.Text("PO History"), content=ft.Container(lv, width=600, height=400))
+        self.page.overlay.append(self._history_dlg); self._history_dlg.open = True; self.page.update()
+
+    def load_for_edit(self, order):
+        try:
+            if hasattr(self, "_history_dlg"):
+                self._history_dlg.open = False
+            
+            self.current_edit_id = order["id"]
+            self.po_no.value = order["po_no"]
+            self.po_date.value = order["po_date"]
+            self.supplier_dd.value = str(order["supplier_id"])
+            self.transporter_dd.value = str(order["transporter_id"]) if order["transporter_id"] else None
+            self.destination.value = order.get("destination", "")
+            self.remarks.value = order.get("remarks", "")
+            self.freight_charge.value = str(order.get("freight", 0))
+            self.other_charge.value = str(order.get("other_charges", 0))
+
+            # Load items
+            items = select("purchase_order_items", {"purchase_order_id": order["id"]})
+            self.order_items = []
+            self.items_col.controls = []
+            
+            # Group by item_id and rate
+            grouped = {}
+            for it in items:
+                k = (str(it["item_id"]), float(it["rate"]))
+                if k not in grouped: grouped[k] = {}
+                grouped[k][it["size_value"]] = it["qty_pieces"]
+            
+            for (iid, rate), sz_map in grouped.items():
+                self.add_item_row(None)
+                row_data = self.order_items[-1]
+                row_data["item_dd"].value = iid
+                row_data["rate_tf"].value = str(rate)
+                row_data["size_qty_map"].update(sz_map)
+                
+                tot_qty = sum(sz_map.values())
+                sz_str = ", ".join(f"{s}:{q}" for s, q in sz_map.items())
+                row_data["qty_tf"].value = str(tot_qty)
+                row_data["size_lbl"].value = sz_str
+
+            self.on_calc_change(None)
+            self._snack(f"Loaded PO: {self.po_no.value}", AppColors.PRIMARY)
+        except Exception as ex:
+            self._snack(f"Edit Load Error: {ex}", "red")
 
     def print_history_po(self, order):
         items = select("purchase_order_items", {"purchase_order_id": order["id"]})

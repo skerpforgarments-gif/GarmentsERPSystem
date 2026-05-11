@@ -68,13 +68,13 @@ class FormBuilder(ft.Container):
         })
 
         if f_type == "text":
-            return ft.TextField(**style_args)
+            return ft.TextField(**style_args, on_change=field.get("on_change"))
 
         elif f_type == "number":
-            return ft.TextField(**style_args, keyboard_type=ft.KeyboardType.NUMBER)
+            return ft.TextField(**style_args, keyboard_type=ft.KeyboardType.NUMBER, on_change=field.get("on_change"))
 
         elif f_type == "date":
-            return ft.TextField(**style_args, hint_text="YYYY-MM-DD", icon=ft.icons.CALENDAR_MONTH)
+            return ft.TextField(**style_args, hint_text="YYYY-MM-DD", icon=ft.icons.CALENDAR_MONTH, on_change=field.get("on_change"))
 
         elif f_type == "dropdown":
             options = field.get("options", [])
