@@ -6,7 +6,7 @@ import math
 from datetime import date
 from core.state import state
 from core.theme import AppColors, AppStyles
-from database.db import select, insert, update, delete, get_next_doc_no, get_next_doc_no
+from database.db import select, insert, update, delete, get_next_doc_no
 from core.pdf_gen import pdf_engine, print_pdf
 
 

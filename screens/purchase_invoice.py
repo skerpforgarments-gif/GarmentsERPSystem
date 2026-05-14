@@ -77,11 +77,19 @@ class PurchaseInvoiceTab(ft.Column):
 
         # ── Items Area ───────────────────────────────────────
         self.items_col = ft.Column(scroll=ft.ScrollMode.AUTO, expand=True, spacing=0)
+        self.items_area = ft.Container(
+            expand=True,
+            bgcolor=ft.colors.WHITE,
+            border=ft.border.all(1, "#E2E8F0"),
+            border_radius=8,
+            padding=0,
+            content=self.items_col,
+        )
 
         self.controls = [
             self._build_header(),
             self._build_col_header(),
-            self.items_col,
+            self.items_area,
             ft.Divider(height=1, color="#E2E8F0"),
             self._build_footer(),
         ]
@@ -384,8 +392,16 @@ class PurchaseInvoiceTab(ft.Column):
             fr = float(self.freight.value or 0)
             ot = float(self.other.value or 0)
             final_taxable = gross_taxable + fr + ot
-            rate = self._party_gst_rate
-            gst_total = final_taxable * (rate / 100)
+            
+            tax_type = str(self.tax_type_dd.value or "GST").upper()
+            c_rate = float(self.cgst_rate_tf.value or 0)
+            s_rate = float(self.sgst_rate_tf.value or 0)
+            i_rate = float(self.igst_rate_tf.value or 0)
+            
+            cgst_amt = final_taxable * (c_rate / 100) if tax_type == "GST" else 0
+            sgst_amt = final_taxable * (s_rate / 100) if tax_type == "GST" else 0
+            igst_amt = final_taxable * (i_rate / 100) if tax_type == "IGST" else 0
+            gst_total = cgst_amt + sgst_amt + igst_amt
             
             subtotal = final_taxable + gst_total
             final_amt = math.ceil(subtotal)
@@ -408,11 +424,11 @@ class PurchaseInvoiceTab(ft.Column):
                 "total_pcs":      int(total_pcs),
                 "total_amount":   round(gross_taxable, 2),
                 "taxable_amount": round(final_taxable, 2),
-                "tax_type":       self._party_tax_type,
-                "tax_per":        rate,
-                "cgst_amount":    round(gst_total/2, 2) if self._party_tax_type != "IGST" else 0,
-                "sgst_amount":    round(gst_total/2, 2) if self._party_tax_type != "IGST" else 0,
-                "igst_amount":    round(gst_total, 2) if self._party_tax_type == "IGST" else 0,
+                "tax_type":       tax_type,
+                "tax_per":        float(self.gst_rate_tf.value or 0),
+                "cgst_amount":    round(cgst_amt, 2),
+                "sgst_amount":    round(sgst_amt, 2),
+                "igst_amount":    round(igst_amt, 2),
                 "round_off":      round(roff, 2),
                 "net_amount":     final_amt,
             }
@@ -545,11 +561,11 @@ class PurchaseInvoiceTab(ft.Column):
                         ft.Text(f"Pcs: {inv.get('total_pcs', 0)}", size=12),
                         ft.Text(f"₹ {float(inv.get('net_amount', 0)):,.2f}", size=14, weight="bold", color=AppColors.PRIMARY),
                         ft.Row([
-                            ft.IconButton(ft.icons.EDIT_INLINED, tooltip="Edit Invoice", icon_color=AppColors.PRIMARY,
+                            ft.IconButton(ft.icons.EDIT_OUTLINED, tooltip="Edit Invoice", icon_color=AppColors.PRIMARY,
                                           on_click=lambda e, i=inv: self.load_invoice_for_edit(i, dlg)),
                             ft.IconButton(ft.icons.PRINT, tooltip="Print Invoice", icon_color=ft.colors.BLUE_700, 
                                           on_click=lambda e, i=inv: self.print_history_invoice(i)),
-                            ft.IconButton(ft.icons.DELETE_INLINE, tooltip="Delete Invoice", icon_color="red",
+                            ft.IconButton(ft.icons.DELETE_OUTLINE, tooltip="Delete Invoice", icon_color="red",
                                           on_click=lambda e, i=inv: self.delete_invoice_from_history(i, dlg))
                         ])
                     ])

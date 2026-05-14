@@ -486,7 +486,8 @@ CREATE TABLE transport_invoices (
     tot_weight          NUMERIC(10,2) DEFAULT 0,
     charges             NUMERIC(12,2) DEFAULT 0,
     -- Status
-    status              TEXT DEFAULT 'Unbilled'  -- Unbilled / Invoiced
+    status              TEXT DEFAULT 'Unbilled',  -- Unbilled / Invoiced
+    created_at          TIMESTAMP DEFAULT now()
 );
 
 CREATE TABLE transport_invoice_items (
@@ -581,12 +582,18 @@ CREATE TABLE purchase_orders (
     po_no               TEXT NOT NULL,
     po_date             DATE NOT NULL DEFAULT CURRENT_DATE,
     supplier_id         UUID NOT NULL REFERENCES parties(id),
+    agent_id            UUID REFERENCES agents(id),
     destination         TEXT,
     transporter_id      UUID REFERENCES transporters(id),
     remarks             TEXT,
+    freight             NUMERIC(12,2) DEFAULT 0,
+    other_charges       NUMERIC(12,2) DEFAULT 0,
     total_pcs           INTEGER DEFAULT 0,
     total_amount        NUMERIC(12,2) DEFAULT 0,
-    status              TEXT DEFAULT 'Pending'
+    tax_per             NUMERIC(5,2) DEFAULT 0,
+    net_amount          NUMERIC(12,2) DEFAULT 0,
+    status              TEXT DEFAULT 'Pending',
+    created_at          TIMESTAMP DEFAULT now()
 );
 
 CREATE TABLE purchase_order_items (
@@ -611,11 +618,21 @@ CREATE TABLE purchase_invoices (
     invoice_no          TEXT NOT NULL,
     invoice_date        DATE NOT NULL DEFAULT CURRENT_DATE,
     supplier_id         UUID NOT NULL REFERENCES parties(id),
+    agent_id            UUID REFERENCES agents(id),
     destination         TEXT,
     transporter_id      UUID REFERENCES transporters(id),
+    order_by            TEXT,
+    order_thro          TEXT DEFAULT 'DIRECT',
+    qty_type            TEXT DEFAULT 'Pieces',
+    lr_no               TEXT,
+    lr_date             DATE,
+    freight_charges     NUMERIC(12,2) DEFAULT 0,
     remarks             TEXT,
     total_pcs           INTEGER DEFAULT 0,
+    total_amount        NUMERIC(12,2) DEFAULT 0,
     taxable_amount      NUMERIC(12,2) DEFAULT 0,
+    tax_type            TEXT DEFAULT 'GST',
+    tax_per             NUMERIC(5,2) DEFAULT 0,
     cgst_amount         NUMERIC(12,2) DEFAULT 0,
     sgst_amount         NUMERIC(12,2) DEFAULT 0,
     igst_amount         NUMERIC(12,2) DEFAULT 0,
@@ -682,7 +699,8 @@ CREATE TABLE payment_vouchers (
     amount          NUMERIC(12,2) DEFAULT 0,
     mode            TEXT,
     bank_id         UUID REFERENCES banks(id),
-    narration       TEXT
+    narration       TEXT,
+    created_at      TIMESTAMP DEFAULT now()
 );
 
 CREATE TABLE ledger_entries (

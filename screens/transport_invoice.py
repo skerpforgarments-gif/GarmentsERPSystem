@@ -489,7 +489,6 @@ class TransportInvoiceTab(ft.Column):
             self.round_off.value   = f"{roff:.2f}"
             self.net_amt.value     = f"Total: ₹{final_amt:,.2f}"
         except Exception: pass
-        except Exception: pass
         if self.page: self.update()
 
     def save_invoice(self, e):
@@ -538,7 +537,7 @@ class TransportInvoiceTab(ft.Column):
             tcs_rate  = float(self.tcs_rate_tf.value or 0)
             
             # Sequence calculation (mirrors _calc)
-            running_total = gross + freight_val
+            running_total = gross
             discs = {}
             for key in self._discount_order:
                 meta = self.DISCOUNT_MAP.get(key)
@@ -548,7 +547,7 @@ class TransportInvoiceTab(ft.Column):
                     discs[key] = {"p": d, "a": amt}
                     running_total -= amt
             
-            taxable = running_total
+            taxable = running_total + freight_val
             cgst_amt = taxable * (cgst_rate / 100) if tax_type == "GST" else 0
             sgst_amt = taxable * (sgst_rate / 100) if tax_type == "GST" else 0
             igst_amt = taxable * (igst_rate / 100) if tax_type == "IGST" else 0
