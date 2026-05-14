@@ -169,6 +169,12 @@ class ChequeTab(ft.Column):
                                     tooltip="Print",
                                     icon_color=ft.colors.BLUE_700,
                                     on_click=lambda e, voucher=h: self.print_entry(voucher)
+                                ),
+                                ft.IconButton(
+                                    icon=ft.icons.DELETE,
+                                    tooltip="Delete",
+                                    icon_color=ft.colors.RED_700,
+                                    on_click=lambda e, voucher=h: self.delete_voucher(voucher)
                                 )
                             ], alignment=ft.MainAxisAlignment.END, spacing=0)
                         )
@@ -313,3 +319,41 @@ class ChequeTab(ft.Column):
             print_pdf(pdf_path)
         except Exception as ex:
             self._snack(f"Error printing cheque: {ex}", "red")
+    def delete_voucher(self, voucher):
+        def confirm_delete(e):
+            try:
+                v_type = voucher["type"]
+                table = "receipt_vouchers" if v_type == "Receipt" else "payment_vouchers"
+                v_no = voucher.get("voucher_no")
+                
+                # 1. Delete voucher record
+                delete(table, {"id": voucher["id"]})
+                
+                # 2. Clean up ledger entries
+                try:
+                    delete("ledger_entries", {
+                        "company_id": state.company_id,
+                        "ref_type": v_type,
+                        "ref_id": v_no
+                    })
+                except Exception:
+                    pass
+                
+                confirm_dlg.open = False
+                self.page.update()
+                self._snack(f"✅ {v_type} {v_no} deleted.", "green")
+                self.load_history()
+            except Exception as ex:
+                self._snack(f"Delete Error: {ex}", "red")
+
+        confirm_dlg = ft.AlertDialog(
+            title=ft.Text("Confirm Delete"),
+            content=ft.Text(f"Are you sure you want to delete {voucher['type']} {voucher.get('voucher_no')}?"),
+            actions=[
+                ft.TextButton("Yes, Delete", on_click=confirm_delete, style=ft.ButtonStyle(color="red")),
+                ft.TextButton("Cancel", on_click=lambda e: (setattr(confirm_dlg, "open", False), self.page.update()))
+            ]
+        )
+        self.page.overlay.append(confirm_dlg)
+        confirm_dlg.open = True
+        self.page.update()

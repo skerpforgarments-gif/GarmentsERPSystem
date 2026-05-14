@@ -172,7 +172,8 @@ CREATE TABLE price_lists (
     list_name       TEXT NOT NULL,
     effective_date  DATE,
     price_type      TEXT DEFAULT 'Wholesale',
-    created_at      TIMESTAMP DEFAULT now()
+    created_at      TIMESTAMP DEFAULT now(),
+    UNIQUE(company_id, list_name)
 );
 
 -- Size-wise rate pivot table

@@ -580,7 +580,8 @@ class PurchaseOrderTab(ft.Column):
                         ], expand=True),
                         ft.Text(f"₹ {float(ord.get('total_amount', 0)):,.2f}", weight="bold"),
                         ft.IconButton(ft.icons.EDIT, on_click=lambda e, o=ord: self.load_for_edit(o), icon_color=AppColors.PRIMARY),
-                        ft.IconButton(ft.icons.PRINT, on_click=lambda e, o=ord: self.print_history_po(o))
+                        ft.IconButton(ft.icons.PRINT, on_click=lambda e, o=ord: self.print_history_po(o)),
+                        ft.IconButton(ft.icons.DELETE, on_click=lambda e, o=ord: self.delete_po_from_history(o), icon_color="red")
                     ])
                 )
             )
@@ -641,6 +642,49 @@ class PurchaseOrderTab(ft.Column):
         comp = select("companies", {"id": state.company_id})
         pdf_path = pdf_engine.generate_order(order, items, comp[0] if comp else {})
         print_pdf(pdf_path)
+
+    def delete_po_from_history(self, order):
+        def confirm_delete(e):
+            try:
+                po_id = order["id"]
+                po_no = order.get("po_no", "")
+
+                # Check for dependencies (if any purchase invoices exist)
+                linked = select("purchase_invoice_items", {"purchase_order_id": po_id})
+                if linked:
+                    self._snack("Cannot delete: This PO is linked to a Purchase Invoice.", "orange")
+                    return
+
+                # 1. Delete associated items
+                delete("purchase_order_items", {"purchase_order_id": po_id})
+                # 2. Delete the PO itself
+                delete("purchase_orders", {"id": po_id})
+                
+                # 3. Clean up ledger & stock entries
+                try:
+                    delete("ledger_entries", {"company_id": state.company_id, "ref_type": "Purchase Order", "ref_id": po_no})
+                    delete("stock_ledger",  {"company_id": state.company_id, "ref_type": "Purchase Order", "ref_id": po_no})
+                except Exception:
+                    pass
+
+                self._history_dlg.open = False
+                self.page.update()
+                self._snack(f"Purchase Order {po_no} deleted.", "green")
+                self.show_history_modal(None)
+            except Exception as ex:
+                self._snack(f"Delete Error: {ex}", "red")
+
+        dlg = ft.AlertDialog(
+            title=ft.Text("Confirm Delete"),
+            content=ft.Text(f"Delete Purchase Order {order.get('po_no')}?"),
+            actions=[
+                ft.TextButton("Yes, Delete", on_click=confirm_delete, style=ft.ButtonStyle(color="red")),
+                ft.TextButton("Cancel", on_click=lambda e: (setattr(dlg, "open", False), self.page.update()))
+            ]
+        )
+        self.page.overlay.append(dlg)
+        dlg.open = True
+        self.page.update()
 
 
 class PurchasesScreen(ft.Column):

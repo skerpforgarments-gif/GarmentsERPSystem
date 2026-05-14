@@ -857,7 +857,29 @@ class MastersScreen(ft.Container):
         self.form.set_values(row)
 
     def delete_item(self, row):
-        self._confirm_delete(f"Delete item '{row.get('item_name')}'?", lambda: (delete("items", {"id": row["id"]}), self.load_items()))
+        item_id = row["id"]
+        # Check all transaction tables that reference this item
+        ref_tables = [
+            ("order_items",              "item_id", "Sales Orders"),
+            ("purchase_order_items",     "item_id", "Purchase Orders"),
+            ("packing_slip_items",       "item_id", "Packing Slips"),
+            ("transport_invoice_items",  "item_id", "Transport Invoices"),
+            ("final_invoice_items",      "item_id", "Tax Invoices"),
+            ("purchase_invoice_items",   "item_id", "Purchase Invoices"),
+            ("stock_ledger",             "item_id", "Stock Ledger"),
+        ]
+        used_in = []
+        for tbl, col, label in ref_tables:
+            try:
+                rows = select(tbl, {col: item_id})
+                if rows:
+                    used_in.append(f"{label} ({len(rows)} records)")
+            except Exception:
+                pass
+        if used_in:
+            self._snack(f"Cannot delete '{row.get('item_name')}' — used in: {', '.join(used_in)}", "red")
+            return
+        self._confirm_delete(f"Delete item '{row.get('item_name')}'?", lambda: (delete("items", {"id": item_id}), self.load_items()))
 
     # =========================================================
     # 2. PRICE LISTS
@@ -891,10 +913,24 @@ class MastersScreen(ft.Container):
         self._refresh()
 
     def save_price_list(self, data):
-        list_header = {"company_id": state.company_id, "list_name": data.get("list_name"), "effective_date": data.get("effective_date"), "price_type": data.get("price_type")}
+        list_name = data.get("list_name", "").strip()
+        if not list_name:
+            self._snack("Price List name is required!", "red")
+            return
+
+        list_header = {"company_id": state.company_id, "list_name": list_name, "effective_date": data.get("effective_date"), "price_type": data.get("price_type")}
         items_pricing = data.get("items_pricing", {})
         try:
+            # Duplicate name check
             is_cloning = data.get("is_clone", False)
+            existing = select("price_lists", {"company_id": state.company_id, "list_name": list_name})
+            if existing:
+                existing_id = str(existing[0]["id"])
+                # Allow if editing the same record (not cloning)
+                if not (self.edit_id and not is_cloning and existing_id == str(self.edit_id)):
+                    self._snack(f"Error: Price List '{list_name}' already exists!", "red")
+                    return
+
             if self.edit_id and not is_cloning:
                 update("price_lists", list_header, {"id": self.edit_id})
                 price_list_id, self.edit_id = self.edit_id, None
@@ -907,7 +943,9 @@ class MastersScreen(ft.Container):
                     insert("price_list_items", {"company_id": state.company_id, "price_list_id": price_list_id, "item_id": item_id, "size_value": size_val, **rates})
             self.close_modal()
             self.load_price_lists()
-        except Exception as e: print(f"Error: {e}")
+            self._snack("Price List Saved Successfully", "green")
+        except Exception as e:
+            self._snack(f"Error: {e}", "red")
 
     def edit_price_list(self, row):
         self.edit_id = row["id"]
@@ -922,7 +960,24 @@ class MastersScreen(ft.Container):
         self.form.set_values(row, pricing_state)
 
     def delete_price_list(self, row):
-        self._confirm_delete(f"Delete price list '{row.get('list_name')}'?", lambda: (delete("price_lists", {"id": row["id"]}), self.load_price_lists()))
+        pl_id = row["id"]
+        # Check if any orders or parties reference this price list
+        ref_tables = [
+            ("orders",           "price_list_id", "Sales Orders"),
+            ("parties",          "price_list_id", "Parties"),
+        ]
+        used_in = []
+        for tbl, col, label in ref_tables:
+            try:
+                rows = select(tbl, {col: pl_id})
+                if rows:
+                    used_in.append(f"{label} ({len(rows)} records)")
+            except Exception:
+                pass
+        if used_in:
+            self._snack(f"Cannot delete '{row.get('list_name')}' — used in: {', '.join(used_in)}", "red")
+            return
+        self._confirm_delete(f"Delete price list '{row.get('list_name')}'?", lambda: (delete("price_lists", {"id": pl_id}), self.load_price_lists()))
 
     # =========================================================
     # 3. PARTIES
@@ -1031,7 +1086,28 @@ class MastersScreen(ft.Container):
         self.form.set_values(row)
 
     def delete_party(self, row):
-        self._confirm_delete(f"Delete party '{row.get('name')}'?", lambda: (delete("parties", {"id": row["id"]}), self.load_parties()))
+        party_id = row["id"]
+        # Check if any transactions reference this party
+        ref_tables = [
+            ("orders",              "party_id",    "Sales Orders"),
+            ("purchase_orders",     "supplier_id", "Purchase Orders"),
+            ("packing_slips",       "party_id",    "Packing Slips"),
+            ("transport_invoices",  "party_id",    "Transport Invoices"),
+            ("final_invoices",      "party_id",    "Tax Invoices"),
+            ("ledger_entries",      "account_id",  "Ledger Entries"),
+        ]
+        used_in = []
+        for tbl, col, label in ref_tables:
+            try:
+                rows = select(tbl, {col: party_id})
+                if rows:
+                    used_in.append(f"{label} ({len(rows)} records)")
+            except Exception:
+                pass
+        if used_in:
+            self._snack(f"Cannot delete '{row.get('name')}' — used in: {', '.join(used_in)}", "red")
+            return
+        self._confirm_delete(f"Delete party '{row.get('name')}'?", lambda: (delete("parties", {"id": party_id}), self.load_parties()))
 
     # =========================================================
     # GENERIC MASTERS
@@ -1049,7 +1125,67 @@ class MastersScreen(ft.Container):
         if hasattr(self.form, "set_values"): self.form.set_values(row)
 
     def _generic_delete(self, table, row):
-        self._confirm_delete(f"Delete entry '{row.get('name') or row.get('item_name')}'?", lambda: (delete(table, {"id": row["id"]}), self.load_tab(self.current_tab)))
+        item_id = row["id"]
+        item_name = row.get('name') or row.get('item_name') or "this entry"
+        
+        # Check dependencies based on table type
+        dependency_map = {
+            "agents": [
+                ("parties", "agent_id", "Parties"),
+                ("orders", "agent_id", "Sales Orders"),
+                ("purchase_orders", "agent_id", "Purchase Orders"),
+            ],
+            "transporters": [
+                ("parties", "transporter_id", "Parties"),
+                ("orders", "transporter_id", "Sales Orders"),
+                ("purchase_orders", "transporter_id", "Purchase Orders"),
+                ("transport_invoices", "transporter_id", "Transport Invoices"),
+            ],
+            "banks": [
+                ("parties", "bank_name", "Parties (Bank Name Match)"), # some use bank_name text
+                ("payment_vouchers", "bank_id", "Payment Vouchers"),
+                ("receipt_vouchers", "bank_id", "Receipt Vouchers"),
+            ],
+            "taxes": [
+                ("items", "tax_name", "Items (Tax Slab)"),
+                ("general_items", "tax_id", "General Items"),
+                ("parties", "tax_type", "Parties"),
+                ("orders", "tax_type", "Sales Orders"),
+            ],
+            "staff": [
+                ("vouchers", "staff_id", "Vouchers"), # if applicable
+            ],
+            "expense_ledgers": [
+                ("ledger_entries", "account_id", "Ledger Entries"),
+            ],
+            "general_items": [
+                ("ledger_entries", "ref_id", "Transactions"), # General items might be used in expense entries
+            ]
+        }
+
+        if table in dependency_map:
+            used_in = []
+            for ref_tbl, ref_col, label in dependency_map[table]:
+                try:
+                    # For some tables we check UUID, for others we might check Name (e.g. tax_name in items)
+                    # We'll try to match by ID first, then by name if the column name implies it
+                    val_to_match = item_id
+                    if ref_col.endswith("_name") or ref_col == "tax_type":
+                        val_to_match = row.get("name") or row.get("item_name")
+                    
+                    if not val_to_match: continue
+                    
+                    rows = select(ref_tbl, {ref_col: val_to_match})
+                    if rows:
+                        used_in.append(f"{label} ({len(rows)} records)")
+                except Exception:
+                    pass
+            
+            if used_in:
+                self._snack(f"Cannot delete '{item_name}' — used in: {', '.join(used_in)}", "red")
+                return
+
+        self._confirm_delete(f"Delete entry '{item_name}'?", lambda: (delete(table, {"id": row["id"]}), self.load_tab(self.current_tab)))
 
     def load_agents(self):
         self._generic_loader("agents", 

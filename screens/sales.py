@@ -1105,32 +1105,54 @@ class OrderEntryTab(ft.Column):
         """Deletes an order and its items from the database, checking for dependencies."""
         def confirm_delete(e):
             try:
-                # Check for dependent packing slips
-                linked_slips = select("packing_slip_items", {"order_id": order["id"]})
+                order_id = order["id"]
+                order_no = order.get("order_no", "")
+
+                # Check full downstream chain
+                linked_slips = select("packing_slip_items", {"order_id": order_id})
                 if linked_slips:
                     confirm_dlg.open = False
                     self.page.update()
                     self.page.snack_bar = ft.SnackBar(
-                        ft.Text("Cannot delete order: It is linked to one or more Packing Slips. Delete the slips first."),
+                        ft.Text("Cannot delete: Order is linked to Packing Slips. Delete the slips first."),
                         bgcolor="orange"
                     )
                     self.page.snack_bar.open = True
                     self.page.update()
                     return
 
-                # 1. Delete associated order items
-                delete("order_items", {"order_id": order["id"]})
-                # 2. Delete the order itself
-                delete("orders", {"id": order["id"]})
-                
+                # Also check if order referenced in packing_slips header
+                linked_ps = select("packing_slips", {"order_id": order_id})
+                if linked_ps:
+                    confirm_dlg.open = False
+                    self.page.update()
+                    self.page.snack_bar = ft.SnackBar(
+                        ft.Text(f"Cannot delete: Order has {len(linked_ps)} Packing Slip(s). Delete them first."),
+                        bgcolor="orange"
+                    )
+                    self.page.snack_bar.open = True
+                    self.page.update()
+                    return
+
+                # Safe to delete — clean up everything
+                delete("order_items", {"order_id": order_id})
+                delete("orders", {"id": order_id})
+
+                # Clean up ledger & stock entries tied to this order
+                try:
+                    delete("ledger_entries", {"company_id": state.company_id, "ref_type": "Sales Order", "ref_id": order_no})
+                    delete("stock_ledger",  {"company_id": state.company_id, "ref_type": "Sales Order", "ref_id": order_no})
+                except Exception:
+                    pass
+
                 confirm_dlg.open = False
                 dlg.open = False
                 self.page.update()
-                
-                self.page.snack_bar = ft.SnackBar(ft.Text(f"Order {order.get('order_no')} deleted successfully"), bgcolor="green")
+
+                self.page.snack_bar = ft.SnackBar(ft.Text(f"Order {order_no} deleted successfully"), bgcolor="green")
                 self.page.snack_bar.open = True
                 self.page.update()
-                
+
                 # Refresh history modal
                 self.show_history_modal(None)
             except Exception as ex:
